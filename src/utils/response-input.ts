@@ -120,7 +120,12 @@ export function convertInputToMessages(
   // Guard against silently forwarding an empty prompt: upstream would answer
   // with a generic greeting instead of an error, which is very hard to debug.
   // An attachment on its own counts as content — "summarise this file" is a
-  // legitimate request with no prompt text of its own.
+  // legitimate request with no prompt text of its own. That is measured, not
+  // assumed: the prompt we forward in that case is literally "Human: \n\n",
+  // and against the live upstream it reads the attached file and answers from
+  // it, while the same empty prompt with no attachment gets back "your message
+  // got cut off". The attachment carries the request; the guard only needs to
+  // catch the genuinely empty case.
   const hasPrompt = messages.some((message) => {
     if (message.role === "system") return false;
     if (typeof message.content === "string") {
