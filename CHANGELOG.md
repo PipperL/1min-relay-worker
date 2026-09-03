@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.2+fork.1] - 2026-09-03
+
+Fork release: upstream 5.0.2 plus the fix below, submitted upstream as
+7a6163/1min-relay-worker#21.
+
+### Fixed
+- **Responses API input items that omit `type`**: `convertInputToMessages` gated on `item.type === "message"`, but `type: "message"` is an omittable default in the OpenAI Responses API spec. Clients that send only `role` + `content` — the n8n OpenAI node among them — had every message silently dropped, so 1min.ai received an empty prompt and answered with a generic greeting instead of responding to the actual request. Content parts named `input_text` and `output_text` are now accepted alongside `text`.
+
+### Changed
+- **Deployment config is no longer tracked**: `wrangler.jsonc` stays as upstream ships it; this account's KV namespace ids live in `wrangler.local.jsonc`, which is git-ignored. Deploy and develop with `-c wrangler.local.jsonc`. Wrangler has no config inheritance, so that file is a full copy and needs manual syncing whenever upstream changes `wrangler.jsonc`.
+
+
 ## [5.0.2] - 2026-06-12
 
 ### Removed

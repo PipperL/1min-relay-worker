@@ -31,3 +31,6 @@ worker/
 *.tsbuildinfo
 *.d.ts
 
+
+# Local deployment config (KV namespace ids for this account)
+wrangler.local.jsonc
