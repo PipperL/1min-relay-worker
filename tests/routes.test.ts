@@ -1,0 +1,368 @@
+/**
+ * Route-level tests: exercise the real Hono app with the upstream stubbed out.
+ *
+ * The unit tests cover the pure helpers; these check the wiring — that routes
+ * are registered, middleware runs, errors come back in the right shape, and
+ * the handlers assemble what the helpers produce.
+ */
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import app from "../src/index";
+import type { Env } from "../src/types";
+
+const env = {
+  ONE_MIN_CHAT_API_URL: "https://api.1min.ai/api/chat-with-ai",
+  ONE_MIN_API_URL: "https://api.1min.ai/api/features",
+  ONE_MIN_ASSET_URL: "https://api.1min.ai/api/assets",
+  ONE_MIN_MODELS_API_URL: "https://api.1min.ai/models",
+} as Env;
+
+const ctx = {
+  waitUntil: () => {},
+  passThroughOnException: () => {},
+} as unknown as ExecutionContext;
+
+function model(id: string, extra: Record<string, unknown> = {}) {
+  return {
+    modelId: id,
+    name: id,
+    provider: "test-provider",
+    status: "ACTIVE",
+    features: ["UNIFY_CHAT_WITH_AI"],
+    modality: { INPUT: ["text"], OUTPUT: ["text"] },
+    creditMetadata: {},
+    ...extra,
+  };
+}
+
+const MODELS: Record<string, unknown[]> = {
+  UNIFY_CHAT_WITH_AI: [
+    model("open-mistral-nemo"),
+    model("retired-chat-model", { status: "DISABLED" }),
+  ],
+  IMAGE_GENERATOR: [
+    model("gpt-image-1-mini", { features: ["IMAGE_GENERATOR"] }),
+    model("black-forest-labs/flux-dev", { features: ["IMAGE_GENERATOR"] }),
+    model("black-forest-labs/flux-schnell", {
+      features: ["IMAGE_GENERATOR"],
+      status: "DISABLED",
+    }),
+  ],
+  SPEECH_TO_TEXT: [model("whisper-1", { features: ["SPEECH_TO_TEXT"] })],
+  TEXT_TO_SPEECH: [model("tts-1", { features: ["TEXT_TO_SPEECH"] })],
+};
+
+const CHAT_RECORD = {
+  aiRecord: {
+    metadata: { inputToken: 98, outputToken: 3, totalToken: 101 },
+    aiRecordDetail: { resultObject: ["Pong"] },
+  },
+};
+
+let upstreamCalls: Array<{ url: string; body?: unknown }>;
+
+function stubUpstream() {
+  upstreamCalls = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === "string" ? input : String(input);
+      let body: unknown;
+      if (init?.body && typeof init.body === "string") {
+        body = JSON.parse(init.body);
+      }
+      upstreamCalls.push({ url, body });
+
+      if (url.startsWith("https://api.1min.ai/models")) {
+        const feature = new URL(url).searchParams.get("feature") ?? "";
+        return new Response(
+          JSON.stringify({ models: MODELS[feature] ?? [] }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (url.startsWith("https://api.1min.ai/api/chat-with-ai")) {
+        return new Response(JSON.stringify(CHAT_RECORD), { status: 200 });
+      }
+
+      if (url.startsWith("https://api.1min.ai/api/features")) {
+        const type = (body as { type?: string })?.type;
+        if (type === "TEXT_TO_SPEECH") {
+          return new Response(
+            JSON.stringify({
+              aiRecord: {
+                temporaryUrl: "https://s3.example/audio.mp3?sig=1",
+                aiRecordDetail: { resultObject: ["audios/generated.mp3"] },
+              },
+            }),
+            { status: 200 },
+          );
+        }
+        return new Response(
+          JSON.stringify({
+            aiRecord: {
+              temporaryUrl: "https://s3.example/first.png?sig=1",
+              aiRecordDetail: {
+                resultObject: ["images/first.png", "images/second.png"],
+              },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+
+      if (url.startsWith("https://s3.example/")) {
+        return new Response(new Uint8Array([1, 2, 3]), { status: 200 });
+      }
+
+      throw new Error(`unexpected upstream call: ${url}`);
+    }),
+  );
+}
+
+function call(path: string, init: RequestInit = {}) {
+  const headers = new Headers(init.headers);
+  if (!headers.has("Authorization")) {
+    headers.set("Authorization", "Bearer test-key");
+  }
+  return app.fetch(
+    new Request(`https://relay.test${path}`, { ...init, headers }),
+    env,
+    ctx,
+  );
+}
+
+beforeEach(stubUpstream);
+afterEach(() => vi.unstubAllGlobals());
+
+describe("auth", () => {
+  it("rejects a request with no credentials", async () => {
+    const res = await app.fetch(
+      new Request("https://relay.test/v1/models"),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as { error: { type: string } };
+    expect(body.error.type).toBe("authentication_error");
+  });
+});
+
+describe("GET /v1/models", () => {
+  it("omits models the upstream reports as DISABLED", async () => {
+    const res = await call("/v1/models");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Array<{ id: string }> };
+    const ids = body.data.map((m) => m.id);
+    expect(ids).toContain("open-mistral-nemo");
+    expect(ids).toContain("gpt-image-1-mini");
+    expect(ids).not.toContain("retired-chat-model");
+    expect(ids).not.toContain("black-forest-labs/flux-schnell");
+  });
+});
+
+describe("GET /v1/models/{model}", () => {
+  it("returns a single model", async () => {
+    const res = await call("/v1/models/open-mistral-nemo");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string; object: string };
+    expect(body).toMatchObject({ id: "open-mistral-nemo", object: "model" });
+  });
+
+  it("handles an id containing a slash", async () => {
+    const res = await call("/v1/models/black-forest-labs/flux-dev");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string };
+    expect(body.id).toBe("black-forest-labs/flux-dev");
+  });
+
+  it("handles a percent-encoded id", async () => {
+    const res = await call("/v1/models/black-forest-labs%2Fflux-dev");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { id: string };
+    expect(body.id).toBe("black-forest-labs/flux-dev");
+  });
+
+  it("404s an unknown model in OpenAI error shape", async () => {
+    const res = await call("/v1/models/no-such-model");
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("model_not_found");
+  });
+});
+
+describe("POST /v1/chat/completions", () => {
+  it("reports the upstream token counts", async () => {
+    const res = await call("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "open-mistral-nemo",
+        messages: [{ role: "user", content: "ping" }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      usage: { prompt_tokens: number; total_tokens: number };
+      choices: Array<{ message: { content: string } }>;
+    };
+    expect(body.usage).toEqual({
+      prompt_tokens: 98,
+      completion_tokens: 3,
+      total_tokens: 101,
+    });
+    expect(body.choices[0]?.message.content).toBe("Pong");
+  });
+
+  it("rejects a request carrying tools", async () => {
+    const res = await call("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "open-mistral-nemo",
+        messages: [{ role: "user", content: "ping" }],
+        tools: [{ type: "function", function: { name: "f" } }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("unsupported_parameter");
+  });
+});
+
+describe("POST /v1/responses", () => {
+  it("accepts an input item that omits `type`", async () => {
+    const res = await call("/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "open-mistral-nemo",
+        input: [
+          { role: "user", content: [{ type: "input_text", text: "ping" }] },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const chatCall = upstreamCalls.find((c) =>
+      c.url.includes("/api/chat-with-ai"),
+    );
+    const prompt = (
+      chatCall?.body as { promptObject: { prompt: string } }
+    ).promptObject.prompt;
+    expect(prompt).toContain("ping");
+  });
+
+  it("rejects an input that yields no content", async () => {
+    const res = await call("/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "open-mistral-nemo", input: [] }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("empty_input");
+  });
+});
+
+describe("POST /v1/images/generations", () => {
+  it("returns fetchable URLs for every result", async () => {
+    const res = await call("/v1/images/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: "an apple", n: 2 }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Array<{ url: string }> };
+    expect(body.data.map((d) => d.url)).toEqual([
+      "https://asset.1min.ai/images/first.png",
+      "https://asset.1min.ai/images/second.png",
+    ]);
+  });
+
+  it("sends `quality` for a model that requires it", async () => {
+    await call("/v1/images/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "gpt-image-1-mini", prompt: "an apple" }),
+    });
+    const featureCall = upstreamCalls.find((c) => c.url.includes("/features"));
+    expect(
+      (featureCall?.body as { promptObject: { quality?: string } }).promptObject
+        .quality,
+    ).toBe("low");
+  });
+
+  it("refuses a DISABLED model", async () => {
+    const res = await call("/v1/images/generations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "black-forest-labs/flux-schnell",
+        prompt: "an apple",
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("model_not_supported");
+  });
+});
+
+describe("POST /v1/audio/speech", () => {
+  it("streams the generated audio back with an audio content type", async () => {
+    const res = await call("/v1/audio/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "tts-1",
+        input: "hello there",
+        voice: "alloy",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("audio/mpeg");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(
+      new Uint8Array([1, 2, 3]),
+    );
+  });
+
+  it("maps the OpenAI field names onto the upstream ones", async () => {
+    await call("/v1/audio/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "tts-1",
+        input: "hello there",
+        voice: "nova",
+        response_format: "wav",
+      }),
+    });
+    const ttsCall = upstreamCalls.find(
+      (c) => (c.body as { type?: string })?.type === "TEXT_TO_SPEECH",
+    );
+    expect(ttsCall?.body).toMatchObject({
+      type: "TEXT_TO_SPEECH",
+      model: "tts-1",
+      promptObject: {
+        text: "hello there",
+        voice: "nova",
+        response_format: "wav",
+      },
+    });
+  });
+
+  it("rejects input that is too long", async () => {
+    const res = await call("/v1/audio/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input: "x".repeat(5000) }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+describe("404", () => {
+  it("answers an unknown path", async () => {
+    const res = await call("/v1/nonexistent");
+    expect(res.status).toBe(404);
+  });
+});
