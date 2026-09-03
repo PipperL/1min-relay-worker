@@ -35,6 +35,8 @@ export interface ParsedSSEBlock {
   chunks: string[];
   /** Message from an `event: error` event, if the upstream reported a failure. */
   error?: string;
+  /** True if the block carried a terminal event (`result` or `done`). */
+  terminal: boolean;
 }
 
 /**
@@ -80,6 +82,7 @@ export function parseSSEChunks(text: string): ParsedSSEBlock | null {
   let hasSSEStructure = false;
   let currentEventType = "";
   let error: string | undefined;
+  let terminal = false;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]?.trim();
@@ -94,6 +97,9 @@ export function parseSSEChunks(text: string): ParsedSSEBlock | null {
     if (line.startsWith("event: ")) {
       hasSSEStructure = true;
       currentEventType = line.slice(7).trim();
+      if (currentEventType === "result" || currentEventType === "done") {
+        terminal = true;
+      }
       continue;
     }
 
@@ -128,7 +134,7 @@ export function parseSSEChunks(text: string): ParsedSSEBlock | null {
     }
   }
 
-  return hasSSEStructure ? { chunks, error } : null;
+  return hasSSEStructure ? { chunks, error, terminal } : null;
 }
 
 /**
@@ -152,9 +158,13 @@ async function processSSEBlock(
 
   let content = accumulatedContent;
   for (const chunk of parsed.chunks) {
-    // Issue #1: dedup using running accumulated string (O(1) per check)
-    // Guards against an upstream that repeats the full text as its last event
-    if (content && chunk === content) continue;
+    // Issue #1: an upstream that repeats the whole answer as its final content
+    // event would otherwise double it. That repeat only ever arrives alongside
+    // the terminal `result`/`done` events, so the check is limited to those
+    // blocks: applying it to every delta silently drops a legitimate chunk
+    // that happens to equal everything streamed so far (short answers like
+    // "ok" followed by "ok" are entirely possible).
+    if (parsed.terminal && content && chunk === content) continue;
 
     content += chunk;
     await callbacks.onChunk(writer, chunk);

@@ -12,6 +12,7 @@ describe("parseSSEChunks", () => {
     expect(parseSSEChunks(CONTENT_BLOCK)).toEqual({
       chunks: ["Hello"],
       error: undefined,
+      terminal: false,
     });
   });
 
@@ -23,10 +24,11 @@ describe("parseSSEChunks", () => {
     const result = parseSSEChunks(
       'event: result\ndata: {"aiRecord":{"uuid":"x"}}',
     );
-    expect(result).toEqual({ chunks: [], error: undefined });
+    expect(result).toEqual({ chunks: [], error: undefined, terminal: true });
     expect(parseSSEChunks(DONE_BLOCK)).toEqual({
       chunks: [],
       error: undefined,
+      terminal: true,
     });
   });
 
@@ -94,5 +96,24 @@ describe("parseSSEChunks", () => {
       'event: content\ndata: {"content":"a"}\ndata: {"content":"b"}',
     );
     expect(result?.chunks).toEqual(["a", "b"]);
+  });
+});
+
+describe("terminal block detection", () => {
+  it("marks blocks carrying result or done", () => {
+    expect(parseSSEChunks(CONTENT_BLOCK)?.terminal).toBe(false);
+    expect(parseSSEChunks(ERROR_BLOCK)?.terminal).toBe(false);
+    expect(parseSSEChunks(DONE_BLOCK)?.terminal).toBe(true);
+    expect(
+      parseSSEChunks('event: result\ndata: {"aiRecord":{}}')?.terminal,
+    ).toBe(true);
+  });
+
+  it("marks a mixed block containing a terminal event", () => {
+    // The dedup guard only applies to these blocks, so this flag decides
+    // whether a repeated final chunk is dropped or forwarded.
+    const block = `${CONTENT_BLOCK}\n\n${DONE_BLOCK}`;
+    expect(parseSSEChunks(block)?.terminal).toBe(true);
+    expect(parseSSEChunks(block)?.chunks).toEqual(["Hello"]);
   });
 });
