@@ -135,6 +135,52 @@ describe("convertInputToMessages", () => {
     expect(() => convertInputToMessages(input)).toThrow(/input_image/);
   });
 
+  it("keeps an input_file part alongside the text", () => {
+    const input = [
+      {
+        role: "user",
+        content: [
+          { type: "input_text", text: "summarise this" },
+          { type: "input_file", file_id: "asset-uuid" },
+        ],
+      },
+    ] as unknown as ResponseInputItem[];
+
+    expect(convertInputToMessages(input)).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "summarise this" },
+          { type: "input_file", file_id: "asset-uuid" },
+        ],
+      },
+    ]);
+  });
+
+  it("accepts an attachment with no prompt text of its own", () => {
+    // "here, deal with this file" is a legitimate request.
+    const input = [
+      {
+        role: "user",
+        content: [{ type: "input_file", file_id: "asset-uuid" }],
+      },
+    ] as unknown as ResponseInputItem[];
+
+    expect(convertInputToMessages(input)).toEqual([
+      {
+        role: "user",
+        content: [{ type: "input_file", file_id: "asset-uuid" }],
+      },
+    ]);
+  });
+
+  it("still returns a plain string when there are no attachments", () => {
+    const input: ResponseInputItem[] = [
+      { role: "user", content: [{ type: "input_text", text: "hello" }] },
+    ];
+    expect(convertInputToMessages(input)[0]?.content).toBe("hello");
+  });
+
   it("rejects an empty input array", () => {
     expect(() => convertInputToMessages([])).toThrow(ValidationError);
   });

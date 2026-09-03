@@ -35,6 +35,9 @@ export const MEDIA_REQUEST_TOKEN_ESTIMATE = 1000;
 // Audio file constraints (matching OpenAI's limits)
 export const MAX_AUDIO_FILE_SIZE = 25 * 1024 * 1024; // 25MB
 
+// Asset API upload limit for file attachments
+export const MAX_ATTACHMENT_FILE_SIZE = 50 * 1024 * 1024; // 50MB
+
 export const SUPPORTED_AUDIO_MIME_TYPES = new Set([
   "audio/mpeg",
   "audio/mp3",

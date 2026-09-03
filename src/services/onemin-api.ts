@@ -9,13 +9,15 @@ import {
 } from "../constants/config";
 import type {
   Env,
+  FileContent,
   Message,
   OneMinChatResponse,
   OneMinImageResponse,
   OneMinPromptObject,
   OneMinRequestBody,
 } from "../types";
-import { ApiError } from "../utils/errors";
+import { ApiError, ValidationError } from "../utils/errors";
+import { collectFileAttachmentIds } from "../utils/file-attachment";
 import { processImageUrl, uploadImageToAsset } from "../utils/image";
 import { extractTextFromMessageContent } from "../utils/message-processing";
 import type { WebSearchConfig } from "../utils/model-parser";
@@ -218,6 +220,35 @@ export class OneMinApiService {
       }
     }
 
+    // Collect file attachments from every message: unlike images, a document
+    // referenced earlier in the conversation stays relevant later on.
+    const fileParts: FileContent[] = [];
+    for (const message of messages) {
+      if (!Array.isArray(message.content)) continue;
+      for (const item of message.content) {
+        if (item.type === "input_file") {
+          fileParts.push(item);
+        }
+      }
+    }
+
+    let fileIds: string[] = [];
+    if (fileParts.length > 0) {
+      try {
+        fileIds = await collectFileAttachmentIds(
+          fileParts,
+          apiKey,
+          this.env.ONE_MIN_ASSET_URL,
+        );
+      } catch (error) {
+        if (error instanceof ApiError || error instanceof ValidationError) {
+          throw error;
+        }
+        console.error("Error processing file attachment:", error);
+        throw new ApiError("Failed to process file attachment", 422);
+      }
+    }
+
     const formattedHistory = formatConversationHistory(messages, "");
 
     const promptObject: OneMinPromptObject = {
@@ -242,10 +273,13 @@ export class OneMinApiService {
       };
     }
 
-    // Add image attachments if any were uploaded
-    if (imagePaths.length > 0) {
+    // Add attachments if any were uploaded. Note the asymmetry the upstream
+    // expects: images are referenced by their storage path, files by the
+    // Asset API's fileContent.uuid.
+    if (imagePaths.length > 0 || fileIds.length > 0) {
       promptObject.attachments = {
-        images: imagePaths,
+        ...(imagePaths.length > 0 ? { images: imagePaths } : {}),
+        ...(fileIds.length > 0 ? { files: fileIds } : {}),
       };
     }
 

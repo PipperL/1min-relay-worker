@@ -81,6 +81,19 @@ function stubUpstream() {
         );
       }
 
+      if (url.startsWith("https://api.1min.ai/api/assets")) {
+        return new Response(
+          JSON.stringify({
+            asset: { key: "documents/uploaded.txt" },
+            fileContent: {
+              uuid: "file-uuid-1234",
+              path: "documents/uploaded.txt",
+            },
+          }),
+          { status: 200 },
+        );
+      }
+
       if (url.startsWith("https://api.1min.ai/api/chat-with-ai")) {
         return new Response(JSON.stringify(CHAT_RECORD), { status: 200 });
       }
@@ -250,6 +263,73 @@ describe("POST /v1/responses", () => {
       chatCall?.body as { promptObject: { prompt: string } }
     ).promptObject.prompt;
     expect(prompt).toContain("ping");
+  });
+
+  it("uploads an input_file and references it by asset uuid", async () => {
+    // The upstream expects attachments.files to hold fileContent.uuid. Given
+    // a path or key it accepts the request, attaches nothing, and lets the
+    // model invent an answer — so this assertion is the guard against a
+    // failure that is invisible at runtime.
+    const res = await call("/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "open-mistral-nemo",
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: "summarise this" },
+              {
+                type: "input_file",
+                filename: "memo.txt",
+                file_data: btoa("secret codename"),
+              },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(res.status).toBe(200);
+
+    expect(upstreamCalls.some((c) => c.url.includes("/api/assets"))).toBe(true);
+
+    const chatCall = upstreamCalls.find((c) =>
+      c.url.includes("/api/chat-with-ai"),
+    );
+    const promptObject = (
+      chatCall?.body as {
+        promptObject: { attachments?: { files?: string[] } };
+      }
+    ).promptObject;
+    expect(promptObject.attachments?.files).toEqual(["file-uuid-1234"]);
+  });
+
+  it("passes an existing file_id through without re-uploading", async () => {
+    await call("/v1/responses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "open-mistral-nemo",
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: "summarise this" },
+              { type: "input_file", file_id: "already-there" },
+            ],
+          },
+        ],
+      }),
+    });
+    expect(upstreamCalls.some((c) => c.url.includes("/api/assets"))).toBe(false);
+    const chatCall = upstreamCalls.find((c) =>
+      c.url.includes("/api/chat-with-ai"),
+    );
+    expect(
+      (chatCall?.body as { promptObject: { attachments?: { files?: string[] } } })
+        .promptObject.attachments?.files,
+    ).toEqual(["already-there"]);
   });
 
   it("rejects an input that yields no content", async () => {

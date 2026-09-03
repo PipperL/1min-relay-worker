@@ -14,6 +14,7 @@ A TypeScript implementation of the 1min.ai API relay service, designed to run on
 - **Streaming Support**: Real-time streaming responses for chat completions
 - **TypeScript**: Full type safety and modern development experience
 - **Vision Support**: Supports image input for vision models
+- **File Attachments**: `input_file` parts on `/v1/responses` are uploaded and attached
 - **Audio Transcription & Translation**: OpenAI Whisper-compatible speech-to-text and audio translation endpoints
 - **Text to Speech**: OpenAI-compatible `/v1/audio/speech` returning audio bytes
 
@@ -137,13 +138,54 @@ array form:
   accepted as `text`, `input_text` or `output_text` — the Responses API uses
   different names for what the client sends and for assistant turns replayed
   into a follow-up request.
-- Non-text content parts (`input_image`, `input_file`, ...) are **not**
-  supported on this endpoint and are rejected with a `400
+- `input_file` parts are supported (see **File attachments** below).
+  Other non-text parts (`input_image`, ...) are rejected with a `400
   unsupported_content_type` error rather than being dropped. Use
   `/v1/chat/completions` for vision requests.
-- A request whose `input` yields no non-empty message content is rejected
+- A request whose `input` yields neither text nor an attachment is rejected
   with a `400 empty_input` error, instead of forwarding an empty prompt
   upstream.
+
+##### File attachments
+
+An `input_file` part attaches a document (PDF, DOCX, TXT, CSV, JSON, ...) to
+the request. Identify the file in one of three ways:
+
+| Field | Meaning |
+|---|---|
+| `file_data` | Base64 payload, bare or as a `data:` URI. Uploaded for you. |
+| `file_url` | HTTPS URL. Fetched and uploaded for you. |
+| `file_id` | An id already returned by the 1min.ai Asset API — used as-is. |
+
+```bash
+curl -X POST http://localhost:8787/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "model": "gpt-4.1",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "input_text", "text": "Summarise this document." },
+          {
+            "type": "input_file",
+            "filename": "memo.txt",
+            "file_data": "SGVsbG8sIHdvcmxkLg=="
+          }
+        ]
+      }
+    ]
+  }'
+```
+
+Uploads are capped at 50MB, the Asset API's limit. An attachment with no
+prompt text of its own is fine.
+
+Note for maintainers: uploaded files are referenced upstream by the Asset
+API's `fileContent.uuid`, **not** by the `path` used for images. Passing a
+path does not fail — the upstream accepts the request, attaches nothing, and
+the model answers from thin air.
 
 **JSON Object Response:**
 

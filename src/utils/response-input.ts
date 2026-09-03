@@ -6,7 +6,12 @@
  * unit tested without a Worker runtime.
  */
 
-import type { Message, ResponseInputItem } from "../types";
+import type {
+  FileContent,
+  Message,
+  MessageContent,
+  ResponseInputItem,
+} from "../types";
 import { ValidationError } from "./errors";
 
 /**
@@ -18,30 +23,39 @@ import { ValidationError } from "./errors";
  */
 const TEXT_PART_TYPES = new Set(["text", "input_text", "output_text"]);
 
+interface ExtractedContent {
+  text: string;
+  files: FileContent[];
+}
+
 /**
- * Extract the text of a single input item's content.
+ * Split an input item's content into its text and its file attachments.
  *
- * Non-text parts (`input_image`, `input_file`, ...) are rejected rather than
- * silently dropped: dropping them would send a truncated prompt upstream and
- * produce a confidently wrong answer.
+ * Anything else (`input_image`, ...) is rejected rather than silently dropped:
+ * dropping it would send a truncated prompt upstream and produce a
+ * confidently wrong answer.
  */
-function extractInputItemText(
-  content: string | Array<{ type: string; text?: string }>,
-): string {
+function extractInputItemContent(
+  content: string | Array<Record<string, unknown>>,
+): ExtractedContent {
   if (typeof content === "string") {
-    return content;
+    return { text: content, files: [] };
   }
 
   const textParts: string[] = [];
+  const files: FileContent[] = [];
   const unsupportedTypes = new Set<string>();
 
   for (const part of content) {
-    if (TEXT_PART_TYPES.has(part.type)) {
-      if (part.text) {
+    const type = typeof part.type === "string" ? part.type : "";
+    if (TEXT_PART_TYPES.has(type)) {
+      if (typeof part.text === "string" && part.text) {
         textParts.push(part.text);
       }
+    } else if (type === "input_file") {
+      files.push({ ...(part as unknown as FileContent), type: "input_file" });
     } else {
-      unsupportedTypes.add(part.type);
+      unsupportedTypes.add(type);
     }
   }
 
@@ -49,15 +63,15 @@ function extractInputItemText(
     const listed = Array.from(unsupportedTypes).sort().join(", ");
     throw new ValidationError(
       `Unsupported content part type(s) in "input": ${listed}. ` +
-        "Only text parts (text, input_text, output_text) are supported by " +
-        "/v1/responses. Use the OpenAI Chat Completions API " +
+        "Supported parts are text (text, input_text, output_text) and " +
+        "input_file. Use the OpenAI Chat Completions API " +
         "(/v1/chat/completions) for vision requests.",
       "input",
       "unsupported_content_type",
     );
   }
 
-  return textParts.join("\n");
+  return { text: textParts.join("\n"), files };
 }
 
 /**
@@ -87,21 +101,37 @@ export function convertInputToMessages(
       if (item.type && item.type !== "message") {
         continue;
       }
-      messages.push({
-        role: item.role,
-        content: extractInputItemText(item.content),
-      });
+
+      const { text, files } = extractInputItemContent(
+        item.content as string | Array<Record<string, unknown>>,
+      );
+
+      // Keep the structured form only when there is something to attach;
+      // a plain string stays a plain string for every other code path.
+      const content: MessageContent =
+        files.length > 0
+          ? [...(text ? [{ type: "text" as const, text }] : []), ...files]
+          : text;
+
+      messages.push({ role: item.role, content });
     }
   }
 
   // Guard against silently forwarding an empty prompt: upstream would answer
   // with a generic greeting instead of an error, which is very hard to debug.
-  const hasPrompt = messages.some(
-    (message) =>
-      message.role !== "system" &&
-      typeof message.content === "string" &&
-      message.content.trim() !== "",
-  );
+  // An attachment on its own counts as content — "summarise this file" is a
+  // legitimate request with no prompt text of its own.
+  const hasPrompt = messages.some((message) => {
+    if (message.role === "system") return false;
+    if (typeof message.content === "string") {
+      return message.content.trim() !== "";
+    }
+    return message.content.some(
+      (part) =>
+        (part.type === "text" && part.text.trim() !== "") ||
+        part.type === "input_file",
+    );
+  });
   if (!hasPrompt) {
     throw new ValidationError(
       'No usable message content found in "input". Provide at least one ' +

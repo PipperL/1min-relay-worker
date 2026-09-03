@@ -4,6 +4,7 @@
 
 export * from "./audio";
 export * from "./errors";
+export * from "./file-attachment";
 export * from "./image";
 export * from "./message-processing";
 export * from "./model-parser";
