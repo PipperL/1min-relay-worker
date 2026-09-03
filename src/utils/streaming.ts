@@ -158,12 +158,16 @@ async function processSSEBlock(
 
   let content = accumulatedContent;
   for (const chunk of parsed.chunks) {
-    // Issue #1: an upstream that repeats the whole answer as its final content
-    // event would otherwise double it. That repeat only ever arrives alongside
-    // the terminal `result`/`done` events, so the check is limited to those
-    // blocks: applying it to every delta silently drops a legitimate chunk
-    // that happens to equal everything streamed so far (short answers like
-    // "ok" followed by "ok" are entirely possible).
+    // Issue #1 guarded against an upstream that repeats the whole answer as a
+    // final content event. Comparing every delta is too blunt: a legitimate
+    // chunk equal to everything streamed so far ("ok" after "ok") was silently
+    // dropped, which is worse than a visible duplicate. The check is therefore
+    // limited to blocks that also carry a terminal event.
+    //
+    // Note this makes the guard close to inert, since SSE events are usually
+    // separated by a blank line and so land in different blocks. That is
+    // deliberate: the current upstream sends pure deltas and puts the full
+    // text in `event: result`, which is ignored anyway.
     if (parsed.terminal && content && chunk === content) continue;
 
     content += chunk;
