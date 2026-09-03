@@ -103,6 +103,47 @@ curl -X POST http://localhost:8787/v1/responses \
   }'
 ```
 
+**Structured Input Format (array of input items):**
+
+```bash
+curl -X POST http://localhost:8787/v1/responses \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{
+    "model": "gpt-4.1",
+    "input": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "input_text", "text": "Can I use LINE in a browser?" }
+        ]
+      }
+    ]
+  }'
+```
+
+##### Accepted shapes for `input`
+
+`input` accepts a plain prompt string or an array of input items. For the
+array form:
+
+- `type` on an input item is **optional**. Per the OpenAI Responses API spec,
+  `type: "message"` is the default, and many clients (the n8n OpenAI node
+  among them) send only `role` + `content`. Both spellings are accepted.
+  Items of any other type (`function_call`, `item_reference`, ...) are
+  skipped.
+- `content` may be a string or an array of content parts. Text parts are
+  accepted as `text`, `input_text` or `output_text` — the Responses API uses
+  different names for what the client sends and for assistant turns replayed
+  into a follow-up request.
+- Non-text content parts (`input_image`, `input_file`, ...) are **not**
+  supported on this endpoint and are rejected with a `400
+  unsupported_content_type` error rather than being dropped. Use
+  `/v1/chat/completions` for vision requests.
+- A request whose `input` yields no non-empty message content is rejected
+  with a `400 empty_input` error, instead of forwarding an empty prompt
+  upstream.
+
 **JSON Object Response:**
 
 ```bash
@@ -309,6 +350,18 @@ Start the development server:
 ```bash
 npm run dev
 ```
+
+### Testing
+
+Unit tests run with [Vitest](https://vitest.dev/):
+
+```bash
+npm test          # single run
+npm run test:watch
+```
+
+Tests live in `tests/` and cover the pure request/response conversion
+helpers, so they need no Worker runtime or upstream API key.
 
 ### Deployment
 
