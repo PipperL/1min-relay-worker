@@ -295,6 +295,20 @@ Only models the upstream reports as `ACTIVE` (and not past their deprecation
 date) are listed — the models API also returns disabled entries, which are
 rejected with `400 UNSUPPORTED_MODEL` if used.
 
+### Retrieve Model
+
+```
+GET /v1/models/{model}
+```
+
+Returns a single model object, or `404 model_not_found`. Model ids containing
+a slash work either raw or percent-encoded:
+
+```bash
+curl http://localhost:8787/v1/models/gpt-4o -H "Authorization: Bearer YOUR_API_KEY"
+curl http://localhost:8787/v1/models/black-forest-labs/flux-dev -H "Authorization: Bearer YOUR_API_KEY"
+```
+
 ### Health Check
 
 ```
