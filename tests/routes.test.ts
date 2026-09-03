@@ -344,6 +344,175 @@ describe("POST /v1/responses", () => {
   });
 });
 
+describe("POST /v1/messages", () => {
+  const anthropicBody = (extra: Record<string, unknown> = {}) => ({
+    model: "open-mistral-nemo",
+    max_tokens: 64,
+    messages: [{ role: "user", content: "ping" }],
+    ...extra,
+  });
+
+  function post(body: unknown, init: RequestInit = {}) {
+    return call("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      ...init,
+    });
+  }
+
+  it("answers in Anthropic message shape", async () => {
+    const res = await post(anthropicBody());
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      type: string;
+      role: string;
+      content: Array<{ type: string; text: string }>;
+      stop_reason: string;
+      usage: { input_tokens: number; output_tokens: number };
+    };
+    expect(body).toMatchObject({
+      type: "message",
+      role: "assistant",
+      stop_reason: "end_turn",
+    });
+    expect(body.content).toEqual([{ type: "text", text: "Pong" }]);
+    // Real upstream counts, not the local estimate.
+    expect(body.usage).toEqual({ input_tokens: 98, output_tokens: 3 });
+  });
+
+  it("folds the top-level system prompt into the upstream prompt", async () => {
+    // Anthropic carries `system` outside `messages`; dropping it here would be
+    // silent — the model just stops following instructions.
+    await post(anthropicBody({ system: "You are a pirate." }));
+    const chatCall = upstreamCalls.find((c) =>
+      c.url.includes("/api/chat-with-ai"),
+    );
+    const prompt = (chatCall?.body as { promptObject: { prompt: string } })
+      .promptObject.prompt;
+    expect(prompt).toContain("You are a pirate.");
+    expect(prompt).toContain("ping");
+  });
+
+  it("flattens text and tool_result content blocks", async () => {
+    await post(
+      anthropicBody({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "here is the tool output" },
+              { type: "tool_result", content: "42" },
+            ],
+          },
+        ],
+      }),
+    );
+    const chatCall = upstreamCalls.find((c) =>
+      c.url.includes("/api/chat-with-ai"),
+    );
+    const prompt = (chatCall?.body as { promptObject: { prompt: string } })
+      .promptObject.prompt;
+    expect(prompt).toContain("here is the tool output");
+    expect(prompt).toContain("42");
+  });
+
+  // --- the Anthropic error-format branch -------------------------------
+  // Everything else in this app answers in OpenAI's error shape. /v1/messages
+  // must not, or an Anthropic SDK client sees an unparseable body instead of
+  // the error. Each case below goes through a different throw site.
+
+  async function expectAnthropicError(res: Response, type: string) {
+    const body = (await res.json()) as {
+      type: string;
+      error: { type: string; message: string };
+    };
+    expect(body.type).toBe("error");
+    expect(body.error.type).toBe(type);
+    expect(typeof body.error.message).toBe("string");
+    // Not the OpenAI shape.
+    expect(body).not.toHaveProperty("error.code");
+    expect(body).not.toHaveProperty("error.param");
+    return body;
+  }
+
+  it("reports a missing max_tokens in Anthropic error shape", async () => {
+    const res = await post({
+      model: "open-mistral-nemo",
+      messages: [{ role: "user", content: "ping" }],
+    });
+    expect(res.status).toBe(400);
+    await expectAnthropicError(res, "invalid_request_error");
+  });
+
+  it("reports missing messages in Anthropic error shape", async () => {
+    const res = await post({ model: "open-mistral-nemo", max_tokens: 64 });
+    expect(res.status).toBe(400);
+    await expectAnthropicError(res, "invalid_request_error");
+  });
+
+  it("reports an auth failure in Anthropic error shape", async () => {
+    const res = await app.fetch(
+      new Request("https://relay.test/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(anthropicBody()),
+      }),
+      env,
+      ctx,
+    );
+    expect(res.status).toBe(401);
+    await expectAnthropicError(res, "authentication_error");
+  });
+
+  it("reports an unknown model in Anthropic error shape", async () => {
+    const res = await post(anthropicBody({ model: "no-such-model" }));
+    expect(res.status).toBe(404);
+    await expectAnthropicError(res, "not_found_error");
+  });
+
+  it("reports invalid JSON in Anthropic error shape", async () => {
+    const res = await call("/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{ not json",
+    });
+    expect(res.status).toBe(400);
+    await expectAnthropicError(res, "invalid_request_error");
+  });
+
+  it("rejects tools in Anthropic error shape", async () => {
+    const res = await post(
+      anthropicBody({ tools: [{ name: "get_weather", input_schema: {} }] }),
+    );
+    expect(res.status).toBe(400);
+    const body = await expectAnthropicError(res, "invalid_request_error");
+    expect(body.error.message).toMatch(/tool/i);
+  });
+
+  it("rejects image blocks with a pointer to the vision endpoint", async () => {
+    const res = await post(
+      anthropicBody({
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "what is this" },
+              {
+                type: "image",
+                source: { type: "base64", media_type: "image/png", data: "x" },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await expectAnthropicError(res, "invalid_request_error");
+    expect(body.error.message).toContain("/v1/chat/completions");
+  });
+});
+
 describe("POST /v1/images/generations", () => {
   it("returns fetchable URLs for every result", async () => {
     const res = await call("/v1/images/generations", {
