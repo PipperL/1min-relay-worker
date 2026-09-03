@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.2+fork.3] - 2026-09-03
+
+A single defensive fix on top of fork.2.
+
 ### Fixed
 - **An all-zero token count is treated as unaccounted, not as free**: the upstream occasionally returns `aiRecord.metadata` with every token count at zero for a request that plainly consumed tokens. `extractOneMinUsage` now falls back to the local estimate in that case, rather than reporting a confident `0/0/0` to a client that meters on usage. Observed once in production against 5.0.2+fork.2 and not reproducible on demand.
 
