@@ -15,6 +15,7 @@ A TypeScript implementation of the 1min.ai API relay service, designed to run on
 - **TypeScript**: Full type safety and modern development experience
 - **Vision Support**: Supports image input for vision models
 - **Audio Transcription & Translation**: OpenAI Whisper-compatible speech-to-text and audio translation endpoints
+- **Text to Speech**: OpenAI-compatible `/v1/audio/speech` returning audio bytes
 
 ## Supported Models
 
@@ -257,11 +258,42 @@ curl -X POST http://localhost:8787/v1/audio/translations \
   -F "model=whisper-1"
 ```
 
+### Text to Speech
+
+```
+POST /v1/audio/speech
+```
+
+Generate speech from text. Returns the audio bytes with the matching
+`Content-Type`, the same as the OpenAI endpoint.
+
+```bash
+curl -X POST http://localhost:8787/v1/audio/speech \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -d '{"model":"tts-1","input":"Hello there","voice":"alloy"}' \
+  --output speech.mp3
+```
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `input` | string | Yes | Text to speak. Max 4096 characters. |
+| `model` | string | No | TTS model ID (default `tts-1`; also `tts-1-hd`, `elevenlabs-tts`, `google-tts`, ...) |
+| `voice` | string | No | Voice name (default `alloy`). Supported voices depend on the model. |
+| `response_format` | string | No | `mp3` (default), `opus`, `aac`, `flac`, `wav`, `pcm` |
+| `speed` | number | No | 0.25–4.0 |
+
 ### List Models
 
 ```
 GET /v1/models
 ```
+
+Only models the upstream reports as `ACTIVE` (and not past their deprecation
+date) are listed — the models API also returns disabled entries, which are
+rejected with `400 UNSUPPORTED_MODEL` if used.
 
 ### Health Check
 
@@ -276,6 +308,7 @@ Returns information about all available endpoints:
 - Image Generation: `/v1/images/generations`
 - Audio Transcription: `/v1/audio/transcriptions`
 - Audio Translation: `/v1/audio/translations`
+- Text to Speech: `/v1/audio/speech`
 - Models: `/v1/models`
 
 ## Rate Limiting

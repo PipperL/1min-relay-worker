@@ -42,4 +42,21 @@ app.post("/translations", authMiddleware, async (c) => {
   });
 });
 
+app.post("/speech", authMiddleware, async (c) => {
+  const rateLimitMiddleware = createRateLimitMiddleware(
+    MEDIA_REQUEST_TOKEN_ESTIMATE,
+  );
+  await rateLimitMiddleware(c, async () => {});
+
+  const apiKey = c.get("apiKey");
+  const audioHandler = new AudioHandler(c.env);
+  const response = await audioHandler.handleSpeech(c.req.raw, apiKey);
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+});
+
 export default app;
