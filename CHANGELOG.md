@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.0.2+fork.2] - 2026-09-03
+
+Still upstream 5.0.2 underneath — the base is unchanged, so the version keeps
+that number and only the fork build increments. Note that SemVer ignores build
+metadata when comparing versions, so `+fork.2` does not sort above `+fork.1`;
+the tag and this file are what order them.
+
+Most of what follows came out of probing the live 1min.ai API rather than
+reading its docs, because the behaviour that mattered was undocumented.
+
+### Added
+- **`GET /v1/models/{model}`**: the single-model endpoint the OpenAI API defines and several clients call on startup. Ids containing a slash (`black-forest-labs/flux-dev`) work both raw and percent-encoded.
+- **`POST /v1/audio/speech`**: OpenAI-compatible text-to-speech over the upstream `TEXT_TO_SPEECH` feature, returning audio bytes with a matching content type. `input` is capped at 4096 characters and `speed` at 0.25–4.0, per the OpenAI spec.
+- **File attachments on `/v1/responses`**: `input_file` content parts are uploaded to the Asset API and attached to the request, so "summarise this PDF" works. An existing `file_id` is passed through without re-uploading. A request carrying only an attachment and no prompt text is accepted — measured against the live upstream, which reads the file and answers from it.
+- **Test suite and CI**: 151 tests across unit and route-level integration (the real Hono app with the upstream stubbed), run on every push.
+
+### Fixed
+- **Token usage was always 0/0/0**: the code read a top-level `usage` object that the upstream does not send. Real counts live in `aiRecord.metadata.{inputToken,outputToken,totalToken}` and are now reported on every text endpoint.
+- **Streaming failures were reported as successful empty answers**: a failed streaming request comes back as HTTP 200 with an `event: error` payload, which the pipeline treated as a normal end of stream. It now aborts and forwards the upstream message as an SSE error instead of telling the client the empty answer was the finished answer.
+- **Image generation was broken in three ways**: the default model (`black-forest-labs/flux-schnell`) is `DISABLED` upstream, so unqualified requests always failed — the default is now `gpt-image-1-mini`; `resultObject` holds S3 paths rather than URLs, and only the first result got a signed `temporaryUrl`, so every result is now returned as an `asset.1min.ai` CDN URL; and `quality`, which some models require, was dropped from the request. `response_format: "b64_json"` is now rejected explicitly rather than returning something that is not base64.
+- **`tools` was silently ignored**: a request asking for function calling got a plain text answer back and no indication that its tools were never offered to the model. It is now rejected with `unsupported_parameter`.
+- **Upstream errors lost the part that explained them**: the upstream `message` can be actively misleading ("service is busy") while the real cause sits in `details`. The `errorCode` and the explanatory detail messages are now forwarded; 401/403/5xx stay generic.
+- **Model ids containing a colon were rejected**: `:online` is a convention this relay adds, not a reserved character, and the blanket rejection refused legitimate upstream ids.
+- **A legitimate chunk could be dropped mid-stream**: the duplicate-answer guard compared every delta against everything streamed so far, so an `"ok"` following an `"ok"` disappeared. It now only applies within a terminal block, which makes it nearly inert — deliberately, since the current upstream sends pure deltas and puts the full text in `event: result`, which is ignored anyway.
+- **Deprecated and disabled models were listed as available**: the registry now filters on `status` and on `deprecationDate` having passed. The KV cache key moved to `model-data-v2`, so the old cache is bypassed rather than served.
+
+### Changed
+- **Empty input is rejected instead of forwarded**: an input that yields no usable content used to reach the upstream as an empty prompt, which answers with a generic greeting rather than an error — the single hardest symptom to debug in the original bug.
+
 ## [5.0.2+fork.1] - 2026-09-03
 
 Fork release: upstream 5.0.2 plus the fix below, submitted upstream as
