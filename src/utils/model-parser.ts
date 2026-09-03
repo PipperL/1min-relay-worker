@@ -37,7 +37,16 @@ export function parseModelName(modelName: string): ModelParseResult {
 
   const trimmedModel = modelName.trim();
 
-  // Check if model has :online suffix (check this first, before rejecting colons)
+  if (!trimmedModel) {
+    return {
+      originalModel: "",
+      hasOnlineSuffix: false,
+      isValid: false,
+      error: "Model name cannot be empty",
+    };
+  }
+
+  // Check if model has :online suffix
   if (trimmedModel.endsWith(ONLINE_SUFFIX)) {
     const originalModel = trimmedModel.slice(0, -ONLINE_SUFFIX.length);
 
@@ -58,17 +67,12 @@ export function parseModelName(modelName: string): ModelParseResult {
     };
   }
 
-  // Check for unsupported colon suffix (not :online)
-  if (trimmedModel.includes(":")) {
-    return {
-      originalModel: "",
-      hasOnlineSuffix: false,
-      isValid: false,
-      error: "Invalid model name format. Only ':online' suffix is supported",
-    };
-  }
-
-  // Standard model name without suffix
+  // Any other name is passed through untouched, colons included: ":online" is
+  // a convention this relay adds on top of the upstream ids, not a reserved
+  // character. Rejecting every colon would refuse a legitimate upstream model
+  // id that happens to contain one. An unknown name — including a mistyped
+  // suffix such as ":onlien" — is caught by model validation, which can say
+  // which models exist.
   return {
     originalModel: trimmedModel,
     hasOnlineSuffix: false,
