@@ -23,11 +23,11 @@
   "license": "ISC",
   "devDependencies": {
     "@biomejs/biome": "2.4.2",
-    "@cloudflare/workers-types": "^4.20250701.0",
+    "@cloudflare/workers-types": "^5.20260826.1",
     "@types/node": "^24.10.1",
     "@types/service-worker-mock": "^2.0.4",
     "typescript": "^5.9.3",
-    "wrangler": "^4.24.3"
+    "wrangler": "^4.126.0"
   },
   "dependencies": {
     "gpt-tokenizer": "^3.4.0",
