@@ -92,15 +92,3 @@ export const TTS_CONTENT_TYPES: Record<string, string> = {
   wav: "audio/wav",
   pcm: "audio/pcm",
 };
-
-// API endpoints
-export const API_ENDPOINTS = {
-  CHAT_COMPLETIONS: "/v1/chat/completions",
-  RESPONSES: "/v1/responses",
-  MESSAGES: "/v1/messages",
-  IMAGES_GENERATIONS: "/v1/images/generations",
-  AUDIO_TRANSCRIPTIONS: "/v1/audio/transcriptions",
-  AUDIO_TRANSLATIONS: "/v1/audio/translations",
-  AUDIO_SPEECH: "/v1/audio/speech",
-  MODELS: "/v1/models",
-} as const;

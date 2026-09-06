@@ -39,20 +39,32 @@ function isValidCachedData(data: unknown): data is CachedModelData {
 
 /**
  * The models API lists entries the account cannot actually use: `status` can be
- * "DISABLED", and `deprecationDate` can already be in the past. Requests for
- * those are rejected upstream with 400 UNSUPPORTED_MODEL, so they must not
- * reach the client model list or pass model validation.
+ * "DISABLED". Requests for those are rejected upstream with 400
+ * UNSUPPORTED_MODEL, so they must not reach the client model list or pass
+ * model validation.
+ *
+ * `deprecationDate` is deliberately not part of this check. Measured against
+ * the live API: every dated entry is ACTIVE with a date weeks or months out,
+ * and the dates arrive in batches shared by unrelated models (2026-10-21
+ * covers gpt-4-turbo, gpt-3.5-turbo, o3-mini and gpt-4.1-nano at once), which
+ * reads as a renewal marker rather than a per-model end of life. Filtering on
+ * it would drop 14 models that answer today — the gpt-5 family among them —
+ * on dates the upstream never treated as an end of life. The one model
+ * confirmed unusable, black-forest-labs/flux-schnell, is flagged by `status`
+ * and carries no deprecation date at all.
  */
-export function isUsableModel(
-  model: OneMinModelEntry,
-  now: number = Date.now(),
-): boolean {
-  if (model.status !== "ACTIVE") return false;
-  if (model.deprecationDate) {
-    const deprecatedAt = Date.parse(model.deprecationDate);
-    if (!Number.isNaN(deprecatedAt) && deprecatedAt <= now) return false;
-  }
-  return true;
+export function isUsableModel(model: OneMinModelEntry): boolean {
+  return model.status === "ACTIVE";
+}
+
+/**
+ * Filtering that removes *everything* means the upstream changed `status`, not
+ * that the account lost every model. Serving the unfiltered list beats 404ing
+ * every request for a whole cache TTL.
+ */
+export function usableModels(models: OneMinModelEntry[]): OneMinModelEntry[] {
+  const usable = models.filter(isUsableModel);
+  return usable.length > 0 ? usable : models;
 }
 
 function processModels(
@@ -61,11 +73,10 @@ function processModels(
   speechModels: OneMinModelEntry[],
   ttsModels: OneMinModelEntry[],
 ): CachedModelData {
-  const now = Date.now();
-  const usableChat = chatModels.filter((m) => isUsableModel(m, now));
-  const usableImage = imageModels.filter((m) => isUsableModel(m, now));
-  const usableSpeech = speechModels.filter((m) => isUsableModel(m, now));
-  const usableTts = ttsModels.filter((m) => isUsableModel(m, now));
+  const usableChat = usableModels(chatModels);
+  const usableImage = usableModels(imageModels);
+  const usableSpeech = usableModels(speechModels);
+  const usableTts = usableModels(ttsModels);
 
   // Deduplicate by modelId (chat models take priority)
   const seen = new Set<string>();
@@ -226,35 +237,11 @@ export async function getModelData(env: Env): Promise<CachedModelData> {
 }
 
 /**
- * Check if a model exists in chat or image models
- */
-export async function isValidModel(model: string, env: Env): Promise<boolean> {
-  const data = await getModelData(env);
-  const speechIds = data.speechModelIds ?? FALLBACK_SPEECH_MODEL_IDS;
-  return (
-    data.chatModelIds.includes(model) ||
-    data.imageModelIds.includes(model) ||
-    speechIds.includes(model)
-  );
-}
-
-/**
  * Check if a model supports vision (modality.INPUT includes "image")
  */
 export async function isVisionModel(model: string, env: Env): Promise<boolean> {
   const data = await getModelData(env);
   return data.visionModelIds.includes(model);
-}
-
-/**
- * Check if a model supports code interpreter (CODE_GENERATOR feature)
- */
-export async function isCodeInterpreterModel(
-  model: string,
-  env: Env,
-): Promise<boolean> {
-  const data = await getModelData(env);
-  return data.codeInterpreterModelIds.includes(model);
 }
 
 /**
@@ -266,14 +253,6 @@ export async function isImageGenerationModel(
 ): Promise<boolean> {
   const data = await getModelData(env);
   return data.imageModelIds.includes(model);
-}
-
-/**
- * Check if a model is a chat model (all chat models support web search)
- */
-export async function isChatModel(model: string, env: Env): Promise<boolean> {
-  const data = await getModelData(env);
-  return data.chatModelIds.includes(model);
 }
 
 /**

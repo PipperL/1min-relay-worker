@@ -7,6 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import app from "../src/index";
 import type { Env } from "../src/types";
 
@@ -75,10 +76,10 @@ function stubUpstream() {
 
       if (url.startsWith("https://api.1min.ai/models")) {
         const feature = new URL(url).searchParams.get("feature") ?? "";
-        return new Response(
-          JSON.stringify({ models: MODELS[feature] ?? [] }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        );
+        return new Response(JSON.stringify({ models: MODELS[feature] ?? [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
       }
 
       if (url.startsWith("https://api.1min.ai/api/assets")) {
@@ -227,7 +228,11 @@ describe("POST /v1/chat/completions", () => {
     expect(body.choices[0]?.message.content).toBe("Pong");
   });
 
-  it("rejects a request carrying tools", async () => {
+  it("accepts and ignores a request carrying tools", async () => {
+    // The 1min.ai Chat with AI API has no function-calling support, but the
+    // Anthropic SDK and Claude Code attach `tools` to essentially every
+    // request — rejecting it broke those clients outright, so it is now
+    // silently ignored instead.
     const res = await call("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -237,9 +242,11 @@ describe("POST /v1/chat/completions", () => {
         tools: [{ type: "function", function: { name: "f" } }],
       }),
     });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string } };
-    expect(body.error.code).toBe("unsupported_parameter");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+    expect(body.choices[0]?.message.content).toBe("Pong");
   });
 });
 
@@ -259,9 +266,9 @@ describe("POST /v1/responses", () => {
     const chatCall = upstreamCalls.find((c) =>
       c.url.includes("/api/chat-with-ai"),
     );
-    const prompt = (
-      chatCall?.body as { promptObject: { prompt: string } }
-    ).promptObject.prompt;
+    expect(chatCall).toBeDefined();
+    const prompt = (chatCall!.body as { promptObject: { prompt: string } })
+      .promptObject.prompt;
     expect(prompt).toContain("ping");
   });
 
@@ -297,8 +304,9 @@ describe("POST /v1/responses", () => {
     const chatCall = upstreamCalls.find((c) =>
       c.url.includes("/api/chat-with-ai"),
     );
+    expect(chatCall).toBeDefined();
     const promptObject = (
-      chatCall?.body as {
+      chatCall!.body as {
         promptObject: { attachments?: { files?: string[] } };
       }
     ).promptObject;
@@ -322,13 +330,19 @@ describe("POST /v1/responses", () => {
         ],
       }),
     });
-    expect(upstreamCalls.some((c) => c.url.includes("/api/assets"))).toBe(false);
+    expect(upstreamCalls.some((c) => c.url.includes("/api/assets"))).toBe(
+      false,
+    );
     const chatCall = upstreamCalls.find((c) =>
       c.url.includes("/api/chat-with-ai"),
     );
+    expect(chatCall).toBeDefined();
     expect(
-      (chatCall?.body as { promptObject: { attachments?: { files?: string[] } } })
-        .promptObject.attachments?.files,
+      (
+        chatCall!.body as {
+          promptObject: { attachments?: { files?: string[] } };
+        }
+      ).promptObject.attachments?.files,
     ).toEqual(["already-there"]);
   });
 
@@ -388,7 +402,8 @@ describe("POST /v1/messages", () => {
     const chatCall = upstreamCalls.find((c) =>
       c.url.includes("/api/chat-with-ai"),
     );
-    const prompt = (chatCall?.body as { promptObject: { prompt: string } })
+    expect(chatCall).toBeDefined();
+    const prompt = (chatCall!.body as { promptObject: { prompt: string } })
       .promptObject.prompt;
     expect(prompt).toContain("You are a pirate.");
     expect(prompt).toContain("ping");
@@ -411,7 +426,8 @@ describe("POST /v1/messages", () => {
     const chatCall = upstreamCalls.find((c) =>
       c.url.includes("/api/chat-with-ai"),
     );
-    const prompt = (chatCall?.body as { promptObject: { prompt: string } })
+    expect(chatCall).toBeDefined();
+    const prompt = (chatCall!.body as { promptObject: { prompt: string } })
       .promptObject.prompt;
     expect(prompt).toContain("here is the tool output");
     expect(prompt).toContain("42");
@@ -481,13 +497,19 @@ describe("POST /v1/messages", () => {
     await expectAnthropicError(res, "invalid_request_error");
   });
 
-  it("rejects tools in Anthropic error shape", async () => {
+  it("accepts and ignores tools", async () => {
+    // `tools` is accepted by the Anthropic schema but not forwarded upstream:
+    // 1min.ai's Chat with AI API has no function-calling support. Rejecting
+    // it outright broke the Anthropic SDK and Claude Code, which attach
+    // `tools` to essentially every request.
     const res = await post(
       anthropicBody({ tools: [{ name: "get_weather", input_schema: {} }] }),
     );
-    expect(res.status).toBe(400);
-    const body = await expectAnthropicError(res, "invalid_request_error");
-    expect(body.error.message).toMatch(/tool/i);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      content: Array<{ type: string; text: string }>;
+    };
+    expect(body.content).toEqual([{ type: "text", text: "Pong" }]);
   });
 
   it("rejects image blocks with a pointer to the vision endpoint", async () => {
@@ -535,8 +557,9 @@ describe("POST /v1/images/generations", () => {
       body: JSON.stringify({ model: "gpt-image-1-mini", prompt: "an apple" }),
     });
     const featureCall = upstreamCalls.find((c) => c.url.includes("/features"));
+    expect(featureCall).toBeDefined();
     expect(
-      (featureCall?.body as { promptObject: { quality?: string } }).promptObject
+      (featureCall!.body as { promptObject: { quality?: string } }).promptObject
         .quality,
     ).toBe("low");
   });

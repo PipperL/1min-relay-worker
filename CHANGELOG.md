@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0+fork.1] - 2026-09-06
+
+Reconciliation with upstream's `5.1.0`, which independently backported most of
+this fork's fixes (7a6163/1min-relay-worker#22) and, in the process, found and
+corrected two mistakes in this fork's own fixes. This release merges upstream
+`main` into `dev`: their corrections are adopted, this fork's exclusive
+features are kept, and their new lint/format toolchain replaces Biome.
+
+### Fixed (correcting mistakes upstream found in this fork)
+- **`tools` was rejected outright**: this fork's fork.2 answered 400
+  `unsupported_parameter` for any request carrying `tools`. Measured against
+  real traffic, that broke the clients most likely to send it — the Anthropic
+  SDK and Claude Code attach `tools` to essentially every `/v1/messages`
+  request, and a conversation replaying a `tool_result` always resends the
+  tools that produced it. `tools` is now accepted and silently ignored: the
+  1min.ai Chat with AI API has no function-calling support, but rejecting the
+  parameter did more harm than accepting and dropping it.
+- **`deprecationDate` was treated as an end of life**: fork.2 filtered out any
+  model whose `deprecationDate` had passed. Measured against the live API,
+  every dated entry is `status: "ACTIVE"` and answers normally on its listed
+  date; the dates arrive in shared batches weeks out (2026-10-21 covers
+  `gpt-4-turbo`, `gpt-3.5-turbo`, `o3-mini` and `gpt-4.1-nano` at once;
+  2026-12-09 covers the `gpt-5` family) and read as a renewal marker, not a
+  cutoff. Filtering on it silently dropped 14 working models. Usability is now
+  judged on `status` alone, with a safety net: if that filter would empty the
+  list entirely, the unfiltered list is served instead of a hard 404 for a
+  whole cache TTL.
+
+### Fixed (upstream fixes not previously in this fork)
+- **A short non-SSE stream body was silently dropped**: `executeStreamingPipeline`
+  never flushed a raw-text response body that never contained a `\n\n`, so a
+  short plain-text completion came back as a successful, empty answer.
+- **`reasoning_effort` was ignored outside JSON-schema responses**: the setting
+  only took effect inside the `responseFormat` branch; an invalid enum value
+  also got appended to the prompt as the literal string `"undefined"`.
+- **`/v1/messages` streaming errors had no event name Anthropic clients could
+  parse**: the shared pipeline wrote an OpenAI-shaped `data:` error frame with
+  no SSE event name, so a client dispatching on event name saw the stream stop
+  mid-message with no `message_stop`. Each protocol's callbacks can now emit
+  their own named error event.
+- **`finish_reason` could fall outside OpenAI's closed set**: the upstream
+  forwards each provider's own wording verbatim (Cohere answers `"complete"`,
+  glm-5.3 omits it), which fails a strictly-typed client. A new
+  `extractFinishReason()` maps known provider strings onto
+  `stop`/`length`/`content_filter`/`tool_calls` and falls back to `stop`.
+- **A CORS ReDoS advisory in hono**: upgraded to 4.13.7, clearing
+  GHSA-8j4g-w8fx-2239 (this fork's resolved version, 4.12.25, was vulnerable).
+
+### Changed
+- **Lint/format toolchain**: Biome is replaced with oxc (`oxlint` + `oxfmt`),
+  matching upstream. `biome.json` is removed.
+- **Test runner**: Vitest upgraded 4 → 5, with `@vitest/coverage-v8`.
+
+### Unchanged (fork-exclusive, not part of upstream `5.1.0`)
+- `POST /v1/audio/speech` (text-to-speech), file attachments on
+  `/v1/responses`, and `GET /v1/models/{model}` were not backported upstream
+  and remain exclusive to this fork.
+
 ## [5.0.2+fork.3] - 2026-09-03
 
 A single defensive fix on top of fork.2.
@@ -54,6 +112,30 @@ Fork release: upstream 5.0.2 plus the fix below, submitted upstream as
 ### Changed
 - **Deployment config is no longer tracked**: `wrangler.jsonc` stays as upstream ships it; this account's KV namespace ids live in `wrangler.local.jsonc`, which is git-ignored. Deploy and develop with `-c wrangler.local.jsonc`. Wrangler has no config inheritance, so that file is a full copy and needs manual syncing whenever upstream changes `wrangler.jsonc`.
 
+## [5.1.0] - 2026-09-06
+
+Backport of the fixes from PipperL/1min-relay-worker, each one verified against
+the live 1min.ai API before being taken.
+
+### Fixed
+- **Token usage was always 0/0/0**: the handlers read `data.usage`, which the upstream response does not have. The accounting lives in `aiRecord.metadata.{inputToken,outputToken,totalToken}`; a local estimate is used only when the record carries no counts (image records, and the occasional all-zero metadata seen in production).
+- **Streaming failures were reported as successful empty completions**: a failed streaming request is answered with HTTP 200 and an in-stream `event: error`, which the SSE parser skipped along with every other non-content event. A bad model name looked like a model that declined to answer.
+- **Image generation with the default model failed outright**: `black-forest-labs/flux-schnell` is listed by the models API but reports `status: "DISABLED"` and is rejected upstream with 400 UNSUPPORTED_MODEL.
+- **Image results were S3 paths, not URLs**: `resultObject` was handed to clients verbatim as `data[].url`. The signed `temporaryUrl` covers only the first result, so `n > 1` left the rest with no URL at all; URLs are now built against the public asset CDN (overridable with `ONE_MIN_ASSET_CDN_URL`).
+- **Models requiring `quality` were unusable**: the field was never sent and never accepted from the client, so `gpt-image-1-mini` and friends answered 400 MISSING_REQUIRED_FIELDS.
+- **`/v1/responses` dropped input items that omit `type`**: the field is an omittable default in the OpenAI spec, so clients sending only `role` + `content` — the n8n OpenAI node among them — had every message discarded and the upstream received an empty prompt. `input_text` and `output_text` content parts are now accepted too.
+- **Upstream error detail was discarded**: every failure was replaced with one generic sentence. The upstream's `message` is sometimes a canned line that misleads ("the service is a bit busy") while `details` holds the real reason; `errorCode` and the `details` messages are now forwarded, credential failures and 5xx excepted.
+- **`finish_reason` could fall outside OpenAI's closed set**: the upstream forwards each provider's own wording (Cohere answers "complete"), which makes a strictly-typed client fail to parse an otherwise fine response.
+- **`/v1/messages` streaming errors were unparseable**: the shared pipeline emitted an OpenAI-shaped error frame with no event name, so an Anthropic client saw the stream stop mid-message with no `message_stop`.
+
+### Changed
+- Default image model is now `gpt-image-1-mini`.
+- `/v1/models` no longer lists models the upstream reports as `DISABLED`. `deprecationDate` is deliberately not filtered on: every dated entry is ACTIVE, answers today, and shares a batch date weeks out, which reads as a renewal marker rather than an end of life.
+- `/v1/responses` answers 400 for unsupported content parts and for input that yields no message content, instead of silently sending a truncated or empty prompt.
+- `response_format: "b64_json"` on image generation is rejected explicitly rather than answered with URLs.
+
+### Added
+- Vitest test suite (62 tests), run in CI.
 
 ## [5.0.2] - 2026-06-12
 

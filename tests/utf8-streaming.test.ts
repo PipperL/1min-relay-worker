@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+
 import { executeStreamingPipeline } from "../src/utils/streaming";
 import { SimpleUTF8Decoder } from "../src/utils/utf8-decoder";
 
@@ -80,14 +81,9 @@ describe("SimpleUTF8Decoder", () => {
     expect(out).toBe(text);
   });
 
-  it("forgets a dangling partial sequence after reset", () => {
-    const decoder = new SimpleUTF8Decoder();
-    const bytes = encoder.encode("你");
-    decoder.decode(bytes.slice(0, 2)); // leaves the sequence open
-    decoder.reset();
-    // A fresh stream must not inherit the previous one's trailing bytes.
-    expect(decoder.decode(encoder.encode("ok"))).toBe("ok");
-  });
+  // `reset()` was dropped as dead code during the upstream merge: every
+  // streaming request builds a fresh SimpleUTF8Decoder (see streaming.ts), so
+  // nothing ever called it in production, only this test.
 });
 
 describe("executeStreamingPipeline with multi-byte content", () => {

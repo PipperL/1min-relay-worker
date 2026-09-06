@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+
 import { parseModelName } from "../src/utils/model-parser";
 
 describe("parseModelName", () => {

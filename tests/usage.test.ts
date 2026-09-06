@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+
 import type { OneMinChatResponse } from "../src/types/responses";
-import { extractOneMinUsage } from "../src/utils/response";
+import { extractFinishReason, extractOneMinUsage } from "../src/utils/response";
 
 // Shape captured from a live 1min.ai chat response.
 const LIVE_METADATA = {
@@ -15,9 +16,7 @@ const LIVE_METADATA = {
   executionTime: 0.365,
 };
 
-function response(
-  metadata?: Record<string, unknown>,
-): OneMinChatResponse {
+function response(metadata?: Record<string, unknown>): OneMinChatResponse {
   return {
     aiRecord: {
       ...(metadata ? { metadata } : {}),
@@ -43,9 +42,7 @@ describe("extractOneMinUsage", () => {
   it("returns null when metadata carries no token counts", () => {
     // Image records put moderation info here; TTS records leave it empty.
     expect(
-      extractOneMinUsage(
-        response({ resultModeration: { status: "unknown" } }),
-      ),
+      extractOneMinUsage(response({ resultModeration: { status: "unknown" } })),
     ).toBeNull();
     expect(extractOneMinUsage(response({}))).toBeNull();
   });
@@ -100,5 +97,47 @@ describe("extractOneMinUsage", () => {
       aiRecord: { aiRecordDetail: { resultObject: ["x"] } },
     } as unknown as OneMinChatResponse;
     expect(extractOneMinUsage(withFakeUsage)).toBeNull();
+  });
+});
+
+describe("extractFinishReason", () => {
+  const withReason = (finishReason?: unknown) =>
+    ({ aiRecord: { metadata: { finishReason } } }) as never;
+
+  it("passes through the reasons OpenAI defines", () => {
+    expect(extractFinishReason(withReason("stop"))).toBe("stop");
+    expect(extractFinishReason(withReason("length"))).toBe("length");
+    expect(extractFinishReason(withReason("content_filter"))).toBe(
+      "content_filter",
+    );
+    expect(extractFinishReason(withReason("tool_calls"))).toBe("tool_calls");
+  });
+
+  it("maps a provider's own spelling onto the closed set", () => {
+    // Measured: Cohere answers "complete" for an ordinary completion, and the
+    // upstream forwards each provider's wording unchanged.
+    expect(extractFinishReason(withReason("complete"))).toBe("stop");
+    expect(extractFinishReason(withReason("MAX_TOKENS"))).toBe("length");
+    expect(extractFinishReason(withReason(" Safety "))).toBe("content_filter");
+    expect(extractFinishReason(withReason("tool_use"))).toBe("tool_calls");
+  });
+
+  it("falls back to stop when the upstream reports nothing usable", () => {
+    // glm-5.3 omits finishReason entirely.
+    expect(extractFinishReason(withReason(undefined))).toBe("stop");
+    expect(extractFinishReason(withReason(42))).toBe("stop");
+    expect(extractFinishReason({} as never)).toBe("stop");
+  });
+
+  it("survives token counts that would make extractOneMinUsage give up", () => {
+    // The reason matters most exactly when the counts are absent or zero, so it
+    // is read straight off the record instead of through the usage helper.
+    const record = {
+      aiRecord: {
+        metadata: { inputToken: 0, outputToken: 0, finishReason: "length" },
+      },
+    } as never;
+    expect(extractOneMinUsage(record)).toBeNull();
+    expect(extractFinishReason(record)).toBe("length");
   });
 });

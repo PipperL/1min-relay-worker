@@ -10,11 +10,15 @@ jobs:
   lint-and-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      # Node only runs the toolchain here — the Worker itself runs on
+      # workerd, pinned by wrangler and `compatibility_date`. One active-LTS
+      # line is enough; `engines` in package.json states the supported range
+      # for contributors.
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
 
       - run: npm ci
@@ -30,3 +34,26 @@ jobs:
 
       - name: Test
         run: npm test
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # What actually ships to the Worker has to be clean.
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+
+      # Dev tooling (wrangler pulls in esbuild, sharp, undici, ws) never
+      # reaches the deployed Worker, and these advisories appear and get
+      # patched on someone else's schedule. Report them, do not gate on them.
+      - name: Audit dev dependencies
+        run: npm audit
+        continue-on-error: true

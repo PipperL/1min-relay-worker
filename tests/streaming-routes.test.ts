@@ -10,6 +10,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import app from "../src/index";
 import type { Env } from "../src/types";
 
@@ -125,7 +126,8 @@ function parseSSE(text: string): SSEEvent[] {
       if (line.startsWith("event: ")) event = line.slice(7).trim();
       else if (line.startsWith("data: ")) dataLines.push(line.slice(6));
     }
-    if (dataLines.length > 0) events.push({ event, data: dataLines.join("\n") });
+    if (dataLines.length > 0)
+      events.push({ event, data: dataLines.join("\n") });
   }
   return events;
 }
@@ -154,17 +156,20 @@ describe("POST /v1/chat/completions (stream: true)", () => {
 
     expect(events.at(-1)?.data).toBe("[DONE]");
 
-    const chunks = events
-      .slice(0, -1)
-      .map((e) => JSON.parse(e.data) as {
-        object: string;
-        choices: Array<{
-          delta: { content?: string };
-          finish_reason: string | null;
-        }>;
-      });
+    const chunks = events.slice(0, -1).map(
+      (e) =>
+        JSON.parse(e.data) as {
+          object: string;
+          choices: Array<{
+            delta: { content?: string };
+            finish_reason: string | null;
+          }>;
+        },
+    );
 
-    expect(chunks.every((c) => c.object === "chat.completion.chunk")).toBe(true);
+    expect(chunks.every((c) => c.object === "chat.completion.chunk")).toBe(
+      true,
+    );
     expect(chunks.map((c) => c.choices[0]?.delta.content ?? null)).toEqual([
       "Hel",
       "lo",
@@ -302,6 +307,11 @@ describe("POST /v1/messages (stream: true)", () => {
     const events = await streamEvents("/v1/messages", request);
     expect(events.some((e) => e.event === "message_start")).toBe(true);
     expect(events.some((e) => e.event === "message_stop")).toBe(false);
-    expect(events.at(-1)?.data).toContain("upstream_stream_error");
+    // The pipeline gives each protocol its own named error event to dispatch
+    // on, rather than an OpenAI-shaped `data:` frame an Anthropic client
+    // can't parse.
+    const last = events.at(-1);
+    expect(last?.event).toBe("error");
+    expect(last?.data).toContain("Model is not supported");
   });
 });

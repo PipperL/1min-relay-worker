@@ -14,7 +14,6 @@ import type {
   OneMinChatResponse,
 } from "../types";
 import {
-  assertToolsUnsupported,
   calculateTokens,
   estimateInputTokens,
   extractOneMinContent,
@@ -32,7 +31,13 @@ export class MessagesHandler extends BaseTextHandler {
     requestBody: AnthropicMessageRequest,
     apiKey: string,
   ): Promise<Response> {
-    assertToolsUnsupported(requestBody.tools);
+    // `tools` is accepted by the Anthropic schema but not forwarded upstream —
+    // 1min.ai's Chat with AI API has no function-calling support. Rejecting it
+    // outright broke the clients most likely to send it: the Anthropic SDK and
+    // Claude Code attach `tools` to essentially every /v1/messages request, and
+    // a conversation replaying a tool_result always resends the tools that
+    // produced it. Silently ignoring `tools` is the answer real clients are
+    // built against.
 
     // Validate required fields
     if (!requestBody.messages || !Array.isArray(requestBody.messages)) {
@@ -231,6 +236,12 @@ export class MessagesHandler extends BaseTextHandler {
         // Send message_stop
         await writeSSEEventWithType(writer, "message_stop", {
           type: "message_stop",
+        });
+      },
+      onError: async (writer, error) => {
+        await writeSSEEventWithType(writer, "error", {
+          type: "error",
+          error: { type: error.type, message: error.message },
         });
       },
     });

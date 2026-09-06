@@ -34,3 +34,8 @@ worker/
 
 # Local deployment config (KV namespace ids for this account)
 wrangler.local.jsonc
+
+# Wrangler local secrets
+.dev.vars
+.dev.vars.*
+coverage/

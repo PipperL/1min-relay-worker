@@ -1,16 +1,12 @@
 import { Hono } from "hono";
+
 import { handleModelEndpoint, handleModelsEndpoint } from "../handlers";
 import { authMiddleware } from "../middleware/auth";
-import type { ModelsResponse } from "../types";
 import type { HonoEnv } from "../types/hono";
 
 const app = new Hono<HonoEnv>();
 
-app.get("/", authMiddleware, async (c) => {
-  const response = await handleModelsEndpoint(c.env);
-  const data = (await response.json()) as ModelsResponse;
-  return c.json(data);
-});
+app.get("/", authMiddleware, (c) => handleModelsEndpoint(c.env));
 
 // Retrieve a single model. The pattern has to swallow slashes: upstream ids
 // such as "black-forest-labs/flux-dev" contain them, and clients send them

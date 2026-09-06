@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+
 import type { FileContent } from "../src/types";
 import { ApiError, ValidationError } from "../src/utils/errors";
 import {
@@ -177,8 +178,8 @@ describe("collectFileAttachmentIds", () => {
   });
 
   it("returns nothing for an empty list", async () => {
-    await expect(collectFileAttachmentIds([], "key", ASSET_URL)).resolves.toEqual(
-      [],
-    );
+    await expect(
+      collectFileAttachmentIds([], "key", ASSET_URL),
+    ).resolves.toEqual([]);
   });
 });

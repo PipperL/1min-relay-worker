@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+
 import { executeStreamingPipeline } from "../src/utils/streaming";
 
 function upstreamResponse(body: string): Response {
@@ -84,9 +85,9 @@ describe("executeStreamingPipeline", () => {
   it("emits the upstream message as an SSE error payload", async () => {
     const result = await run(FAILS_IMMEDIATELY);
     expect(result.output).toContain("Model bogus-model is not supported");
-    const payload = JSON.parse(
-      result.output.replace(/^data: /, "").trim(),
-    ) as { error: { message: string; code: string | null } };
+    const payload = JSON.parse(result.output.replace(/^data: /, "").trim()) as {
+      error: { message: string; code: string | null };
+    };
     expect(payload.error.code).toBe("upstream_stream_error");
   });
 
