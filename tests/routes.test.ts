@@ -516,7 +516,7 @@ describe("POST /v1/messages", () => {
     expect(body.content).toEqual([{ type: "text", text: "Pong" }]);
   });
 
-  it("rejects image blocks with a pointer to the vision endpoint", async () => {
+  it("rejects image blocks for a non-vision model", async () => {
     const res = await post(
       anthropicBody({
         messages: [
@@ -535,7 +535,7 @@ describe("POST /v1/messages", () => {
     );
     expect(res.status).toBe(400);
     const body = await expectAnthropicError(res, "invalid_request_error");
-    expect(body.error.message).toContain("/v1/chat/completions");
+    expect(body.error.message).toContain("does not support image inputs");
   });
 });
 

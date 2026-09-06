@@ -6,12 +6,16 @@
 import { DEFAULT_MODEL } from "../constants";
 import type {
   AnthropicContentBlock,
+  AnthropicImageContent,
   AnthropicMessage,
   AnthropicMessageRequest,
   AnthropicMessageResponse,
   AnthropicTextContent,
+  ImageContent,
   Message,
+  MessageContent,
   OneMinChatResponse,
+  TextContent,
 } from "../types";
 import {
   calculateTokens,
@@ -109,35 +113,73 @@ export class MessagesHandler extends BaseTextHandler {
 
   private extractAnthropicContent(
     content: string | AnthropicContentBlock[],
-  ): string {
+  ): MessageContent {
     if (typeof content === "string") {
       return content;
     }
 
-    // Check for unsupported image blocks
     const hasImages = content.some((block) => block.type === "image");
-    if (hasImages) {
-      throw new ValidationError(
-        "Image content blocks in Anthropic format are not yet supported. Use the OpenAI Chat Completions API (/v1/chat/completions) for vision requests.",
-        "content",
-        "unsupported_content_type",
-      );
+    if (!hasImages) {
+      // No images: keep the original flattened-to-text behavior so plain
+      // text/tool_result conversations are unaffected.
+      const textParts: string[] = [];
+      for (const block of content) {
+        if (block.type === "text") {
+          textParts.push(block.text);
+        } else if (block.type === "tool_result") {
+          const resultText =
+            typeof block.content === "string"
+              ? block.content
+              : block.content.map((b) => b.text).join("\n");
+          textParts.push(resultText);
+        }
+      }
+      return textParts.join("\n");
     }
 
-    // Extract text from content blocks
-    const textParts: string[] = [];
+    // Images present: emit a MessageContent array so the shared vision
+    // pipeline (isVisionModel gating, Asset API upload — see onemin-api.ts
+    // and processMessagesWithImageCheck) handles it exactly like the OpenAI
+    // Chat Completions path.
+    const parts: (TextContent | ImageContent)[] = [];
     for (const block of content) {
       if (block.type === "text") {
-        textParts.push(block.text);
+        parts.push({ type: "text", text: block.text });
+      } else if (block.type === "image") {
+        parts.push({
+          type: "image_url",
+          image_url: { url: this.anthropicImageToUrl(block) },
+        });
       } else if (block.type === "tool_result") {
         const resultText =
           typeof block.content === "string"
             ? block.content
             : block.content.map((b) => b.text).join("\n");
-        textParts.push(resultText);
+        parts.push({ type: "text", text: resultText });
       }
     }
-    return textParts.join("\n");
+    return parts;
+  }
+
+  /**
+   * Anthropic's image source is either a base64 payload (turned into a
+   * `data:` URL, the same shape `processImageUrl` already parses for the
+   * OpenAI path) or a plain URL.
+   */
+  private anthropicImageToUrl(block: AnthropicImageContent): string {
+    const { source } = block;
+    if (source.type === "url" && source.url) {
+      return source.url;
+    }
+    if (source.type === "base64" && source.data) {
+      const mediaType = source.media_type || "image/png";
+      return `data:${mediaType};base64,${source.data}`;
+    }
+    throw new ValidationError(
+      "Image content block requires source.url (for type 'url') or source.data (for type 'base64')",
+      "content",
+      "invalid_image_source",
+    );
   }
 
   private async handleNonStreamingMessage(

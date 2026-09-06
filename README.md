@@ -466,15 +466,18 @@ curl -X POST http://localhost:8787/v1/messages \
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `messages` | array | Yes | Anthropic messages; `text` and `tool_result` blocks are flattened into the prompt |
+| `messages` | array | Yes | Anthropic messages; `text` and `tool_result` blocks are flattened into the prompt. `image` blocks are supported on vision models (see below) |
 | `max_tokens` | number | Yes | Required by the Anthropic schema; not forwarded upstream |
 | `model` | string | No | Defaults to `open-mistral-nemo` |
 | `system` | string \| array | No | String or `text` block array |
 | `stream` | boolean | No | Anthropic SSE event stream |
 
-> **`image` content blocks are rejected with a 400.** Use
-> `/v1/chat/completions` for vision. `tools` is accepted by the schema but
-> ignored.
+`image` content blocks (`{"type": "image", "source": {...}}`) are supported
+the same way as `/v1/chat/completions`: `source.type` may be `base64`
+(`media_type` + `data`) or `url`. As with the OpenAI path, this only works on
+models the registry reports as vision-capable — a non-vision model answers
+with a 400. `tools` is accepted by the schema but ignored, since the
+upstream Chat with AI API has no function-calling support.
 
 ### List Models
 

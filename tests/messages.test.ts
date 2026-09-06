@@ -17,6 +17,7 @@ import {
   testCtx,
   testEnv,
   UPSTREAM,
+  VISION_MODEL,
 } from "./helpers";
 
 let upstream: FetchMock;
@@ -170,7 +171,7 @@ describe("validation", () => {
     expect(JSON.stringify(await res.json())).toContain("max_tokens");
   });
 
-  it("rejects image content blocks", async () => {
+  it("rejects image content blocks for a non-vision model", async () => {
     const res = await post({
       model: CHAT_MODEL,
       max_tokens: 10,
@@ -187,7 +188,24 @@ describe("validation", () => {
       ],
     });
     expect(res.status).toBe(400);
-    expect(JSON.stringify(await res.json())).toContain("not yet supported");
+    expect(JSON.stringify(await res.json())).toContain(
+      "does not support image inputs",
+    );
+  });
+
+  it("rejects an image block with neither url nor data", async () => {
+    const res = await post({
+      model: VISION_MODEL,
+      max_tokens: 10,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "image", source: { type: "base64" } }],
+        },
+      ],
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toContain("source.url");
   });
 
   it("reports an unknown model as an Anthropic not_found_error", async () => {
@@ -201,6 +219,76 @@ describe("validation", () => {
       type: "error",
       error: { type: "not_found_error" },
     });
+  });
+});
+
+describe("images", () => {
+  it("uploads a base64 image block and attaches its path", async () => {
+    upstream.reply(UPSTREAM.asset, () =>
+      Response.json({ fileContent: { path: "images/abc.png" } }),
+    );
+    upstream.reply(UPSTREAM.chat, () => oneMinChatResponse("a cat"));
+
+    const res = await post({
+      model: VISION_MODEL,
+      max_tokens: 10,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this?" },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: "aGVsbG8=",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(requestTo(upstream, UPSTREAM.chat).body).toMatchObject({
+      promptObject: { attachments: { images: ["images/abc.png"] } },
+    });
+    expect(upstream.callsTo(UPSTREAM.asset)).toHaveLength(1);
+  });
+
+  it("fetches and uploads a url-sourced image block through the same asset pipeline", async () => {
+    upstream.on((url) =>
+      url === "https://example.com/dog.png"
+        ? new Response(new Uint8Array([1, 2, 3]), {
+            headers: { "content-type": "image/png" },
+          })
+        : undefined,
+    );
+    upstream.reply(UPSTREAM.asset, () =>
+      Response.json({ fileContent: { path: "images/dog.png" } }),
+    );
+    upstream.reply(UPSTREAM.chat, () => oneMinChatResponse("a dog"));
+
+    const res = await post({
+      model: VISION_MODEL,
+      max_tokens: 10,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "url", url: "https://example.com/dog.png" },
+            },
+          ],
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(requestTo(upstream, UPSTREAM.chat).body).toMatchObject({
+      promptObject: { attachments: { images: ["images/dog.png"] } },
+    });
+    expect(upstream.callsTo(UPSTREAM.asset)).toHaveLength(1);
   });
 });
 
