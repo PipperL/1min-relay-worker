@@ -290,6 +290,83 @@ describe("images", () => {
     });
     expect(upstream.callsTo(UPSTREAM.asset)).toHaveLength(1);
   });
+
+  it("uploads every image block in the message, in order", async () => {
+    let uploadCount = 0;
+    upstream.on((url) =>
+      url.startsWith(UPSTREAM.asset)
+        ? Response.json({
+            fileContent: { path: `images/${++uploadCount}.png` },
+          })
+        : undefined,
+    );
+    upstream.reply(UPSTREAM.chat, () => oneMinChatResponse("two things"));
+
+    const res = await post({
+      model: VISION_MODEL,
+      max_tokens: 10,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "compare these" },
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/png", data: "AA==" },
+            },
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/png", data: "Bg==" },
+            },
+          ],
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(requestTo(upstream, UPSTREAM.chat).body).toMatchObject({
+      promptObject: {
+        attachments: { images: ["images/1.png", "images/2.png"] },
+      },
+    });
+    expect(upstream.callsTo(UPSTREAM.asset)).toHaveLength(2);
+  });
+
+  it("still extracts tool_result text when an image block is also present", async () => {
+    upstream.reply(UPSTREAM.asset, () =>
+      Response.json({ fileContent: { path: "images/abc.png" } }),
+    );
+    upstream.reply(UPSTREAM.chat, () => oneMinChatResponse("ok"));
+
+    const res = await post({
+      model: VISION_MODEL,
+      max_tokens: 10,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "call_1",
+              content: "the weather is sunny",
+            },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: "aGVsbG8=",
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(requestTo(upstream, UPSTREAM.chat).body).toMatchObject({
+      promptObject: { attachments: { images: ["images/abc.png"] } },
+    });
+    expect(prompt()).toContain("the weather is sunny");
+  });
 });
 
 describe("streaming", () => {
@@ -318,6 +395,42 @@ describe("streaming", () => {
     ]);
     expect(text).toContain('"text":"Hel"');
     expect(text).toContain('"stop_reason":"end_turn"');
+  });
+
+  it("uploads an image block before streaming the response", async () => {
+    upstream.reply(UPSTREAM.asset, () =>
+      Response.json({ fileContent: { path: "images/abc.png" } }),
+    );
+    upstream.reply(UPSTREAM.chat, () => sseResponse([contentBlock("a cat")]));
+
+    const res = await post({
+      model: VISION_MODEL,
+      max_tokens: 10,
+      stream: true,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "what is this?" },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/png",
+                data: "aGVsbG8=",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(res.status).toBe(200);
+    expect(requestTo(upstream, UPSTREAM.chat).body).toMatchObject({
+      promptObject: { attachments: { images: ["images/abc.png"] } },
+    });
+    const text = await res.text();
+    expect(text).toContain('"text":"a cat"');
   });
 
   it("emits an Anthropic error event when the upstream stream fails", async () => {
