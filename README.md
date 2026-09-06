@@ -1,7 +1,18 @@
 # 1min-relay Cloudflare Worker
 
-![GitHub package.json version](https://img.shields.io/github/package-json/v/7a6163/1min-relay-worker)
-[![codecov](https://codecov.io/gh/7a6163/1min-relay-worker/graph/badge.svg)](https://codecov.io/gh/7a6163/1min-relay-worker)
+> **This is a personal fork.** [PipperL/1min-relay-worker](https://github.com/PipperL/1min-relay-worker)
+> is based on the official upstream project,
+> [7a6163/1min-relay-worker](https://github.com/7a6163/1min-relay-worker) (currently v5.1.0),
+> with additional fixes and fork-only features layered on top (see the sections below marked
+> "fork-only addition", e.g. multi-backend Text to Speech and image support on the
+> Anthropic-compatible `/v1/messages` endpoint).
+>
+> **If you want the original, unmodified project — including its own "Deploy to Cloudflare"
+> button and clone URL — go to the upstream repo linked above.** Everything in this README
+> (clone command, Deploy button, badges) points at this fork, not upstream; the two are not
+> interchangeable; deploying/cloning from the wrong one will get you different code.
+
+![GitHub package.json version](https://img.shields.io/github/package-json/v/PipperL/1min-relay-worker)
 
 A TypeScript implementation of the 1min.ai API relay service, designed to run on Cloudflare Workers with distributed rate limiting and accurate token counting.
 
@@ -553,7 +564,7 @@ rather than failing closed.
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/7a6163/1min-relay-worker.git
+git clone https://github.com/PipperL/1min-relay-worker.git
 cd 1min-relay-worker
 ```
 
@@ -622,7 +633,7 @@ helpers, so they need no Worker runtime or upstream API key.
 
 The fastest way to deploy is using the Cloudflare Deploy button at the top of this README:
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/7a6163/1min-relay-worker)
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/PipperL/1min-relay-worker)
 
 #### Manual Deployment
 
