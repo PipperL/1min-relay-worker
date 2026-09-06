@@ -4,7 +4,9 @@
 
 import {
   DEFAULT_IMAGE_QUALITY,
+  ELEVENLABS_TTS_MODEL_ID,
   IMAGE_MODELS_REQUIRING_QUALITY,
+  QWEN3_TTS_MODEL_ID,
   WHISPER_MODEL_IDS,
 } from "../constants/config";
 import type {
@@ -21,6 +23,7 @@ import { collectFileAttachmentIds } from "../utils/file-attachment";
 import { processImageUrl, uploadImageToAsset } from "../utils/image";
 import { extractTextFromMessageContent } from "../utils/message-processing";
 import type { WebSearchConfig } from "../utils/model-parser";
+import type { ParsedSpeechRequest } from "../utils/speech";
 import { describeUpstreamError } from "../utils/upstream-error";
 import { isVisionModel } from "./model-registry";
 
@@ -322,19 +325,43 @@ export class OneMinApiService {
     };
   }
 
-  buildTextToSpeechRequestBody(
-    text: string,
-    model: string,
-    voice: string,
-    responseFormat: string,
-    speed?: number,
-  ): OneMinRequestBody {
+  /**
+   * Builds the per-model promptObject shape. `extra` (vendor-native fields
+   * with no OpenAI-shaped equivalent, e.g. ElevenLabs' `voice_settings` or
+   * Qwen3's `language_type`) is spread first so the explicit named fields
+   * below always win, even if a client tries to smuggle `text`/`voice`
+   * through the passthrough.
+   */
+  buildTextToSpeechRequestBody(parsed: ParsedSpeechRequest): OneMinRequestBody {
+    const { model, text, voice, responseFormat, speed, extra } = parsed;
+
+    if (model === ELEVENLABS_TTS_MODEL_ID) {
+      const promptObject: OneMinPromptObject = {
+        ...extra,
+        text,
+        voice_id: voice,
+      };
+      if (responseFormat !== undefined) {
+        promptObject.output_format = responseFormat;
+      }
+      return { type: "TEXT_TO_SPEECH", model, promptObject };
+    }
+
+    if (model === QWEN3_TTS_MODEL_ID) {
+      const promptObject: OneMinPromptObject = {
+        ...extra,
+        text,
+        voice,
+      };
+      return { type: "TEXT_TO_SPEECH", model, promptObject };
+    }
+
     const promptObject: OneMinPromptObject = {
+      ...extra,
       text,
       voice,
       response_format: responseFormat,
     };
-
     if (speed !== undefined) {
       promptObject.speed = speed;
     }

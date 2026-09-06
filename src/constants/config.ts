@@ -92,3 +92,8 @@ export const TTS_CONTENT_TYPES: Record<string, string> = {
   wav: "audio/wav",
   pcm: "audio/pcm",
 };
+
+// TTS model ids that need per-model field handling (see src/utils/speech.ts)
+// because their upstream backend isn't OpenAI-shaped.
+export const ELEVENLABS_TTS_MODEL_ID = "elevenlabs-tts";
+export const QWEN3_TTS_MODEL_ID = "qwen3-tts-flash";

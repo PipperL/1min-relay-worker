@@ -393,10 +393,49 @@ curl -X POST http://localhost:8787/v1/audio/speech \
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `input` | string | Yes | Text to speak. Max 4096 characters. |
-| `model` | string | No | TTS model ID (default `tts-1`; also `tts-1-hd`, `elevenlabs-tts`, `google-tts`, ...) |
+| `model` | string | No | TTS model ID (default `tts-1`). |
 | `voice` | string | No | Voice name (default `alloy`). Supported voices depend on the model. |
 | `response_format` | string | No | `mp3` (default), `opus`, `aac`, `flac`, `wav`, `pcm` |
 | `speed` | number | No | 0.25–4.0 |
+
+**Currently supported TTS models:** `tts-1` and `tts-1-hd` are OpenAI-compatible
+and use the parameters above as-is. `elevenlabs-tts` and `qwen3-tts-flash` are
+different backends behind the same endpoint and get the per-model field
+handling described below. Any other model ID (including `google-tts`, for
+which no upstream documentation could be found) is sent in the plain OpenAI
+shape unchanged; if a future model turns out to be OpenAI-compatible or needs
+its own mapping, it can be added the same way.
+
+**Per-model field handling (elevenlabs-tts / qwen3-tts-flash):**
+
+Fields that exist under different names on both sides are translated
+automatically — the model's own native field name wins if you send it
+directly, otherwise the OpenAI-shaped name is mapped onto it. Values are
+never rewritten or validated by the relay; an unsupported voice or format is
+left for the upstream to reject.
+
+| OpenAI-shaped field | elevenlabs-tts native field | qwen3-tts-flash native field |
+|---|---|---|
+| `voice` | `voice_id` | `voice` (same name, no mapping needed) |
+| `response_format` | `output_format` | *(not supported — see below)* |
+| `speed` | *(not supported — see below)* | *(not supported — see below)* |
+
+Fields the relay recognizes but the model can't honor under any name are
+rejected with a 400 rather than silently dropped, since the upstream itself
+has no way to reject them:
+
+- `speed` — neither ElevenLabs nor Qwen3 has an equivalent.
+- `response_format` / `output_format` — Qwen3 always returns WAV and has no
+  such field at all.
+
+Everything else is passed straight through to the upstream unvalidated —
+for example ElevenLabs' `model_id`, `voice_settings`, `optimize_streaming_latency`,
+`language_code`, or Qwen3's `language_type`. Send these under their native
+names and they'll reach the upstream as-is; see each model's docs on
+[docs.1min.ai](https://docs.1min.ai/docs/api/ai-for-audio/text-to-speech) for
+the full set. The response `Content-Type` always reflects what the model
+actually returns (ElevenLabs is mp3-family audio, Qwen3 is always wav)
+rather than echoing the requested `response_format`.
 
 > This endpoint is a fork-only addition — not part of the upstream project.
 

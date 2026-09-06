@@ -45,6 +45,14 @@ export interface SpeechRequest {
   voice?: string;
   response_format?: string;
   speed?: number;
+  /** ElevenLabs' native voice field; wins over `voice` when both are set */
+  voice_id?: string;
+  /** ElevenLabs' native format field; wins over `response_format` when both are set */
+  output_format?: string;
+  // Everything else (e.g. ElevenLabs' `model_id`/`voice_settings`/
+  // `optimize_streaming_latency`/`language_code`, Qwen3's `language_type`) is
+  // forwarded to the upstream as-is — see the TTS parameter table in README.
+  [key: string]: unknown;
 }
 
 export interface JSONSchema {

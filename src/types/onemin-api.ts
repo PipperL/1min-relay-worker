@@ -43,6 +43,14 @@ export interface OneMinPromptObject {
   text?: string;
   voice?: string;
   speed?: number;
+  /** ElevenLabs native voice field (used instead of `voice`) */
+  voice_id?: string;
+  /** ElevenLabs native format field (used instead of `response_format`) */
+  output_format?: string;
+  // Arbitrary vendor-native passthrough fields (ElevenLabs' `model_id`,
+  // `voice_settings`, `optimize_streaming_latency`, `language_code`; Qwen3's
+  // `language_type`; etc.) — forwarded to the upstream unvalidated.
+  [key: string]: unknown;
 }
 
 export interface OneMinRequestBody {

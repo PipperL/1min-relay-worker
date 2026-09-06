@@ -50,7 +50,11 @@ const MODELS: Record<string, unknown[]> = {
     }),
   ],
   SPEECH_TO_TEXT: [model("whisper-1", { features: ["SPEECH_TO_TEXT"] })],
-  TEXT_TO_SPEECH: [model("tts-1", { features: ["TEXT_TO_SPEECH"] })],
+  TEXT_TO_SPEECH: [
+    model("tts-1", { features: ["TEXT_TO_SPEECH"] }),
+    model("elevenlabs-tts", { features: ["TEXT_TO_SPEECH"] }),
+    model("qwen3-tts-flash", { features: ["TEXT_TO_SPEECH"] }),
+  ],
 };
 
 const CHAT_RECORD = {
@@ -620,6 +624,95 @@ describe("POST /v1/audio/speech", () => {
         response_format: "wav",
       },
     });
+  });
+
+  it("builds an ElevenLabs-shaped request and answers with an mp3 Content-Type", async () => {
+    const res = await call("/v1/audio/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "elevenlabs-tts",
+        input: "hello there",
+        voice: "nova",
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.5 },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("audio/mpeg");
+
+    const ttsCall = upstreamCalls.find(
+      (c) => (c.body as { type?: string })?.type === "TEXT_TO_SPEECH",
+    );
+    expect(ttsCall?.body).toMatchObject({
+      type: "TEXT_TO_SPEECH",
+      model: "elevenlabs-tts",
+      promptObject: {
+        text: "hello there",
+        voice_id: "nova",
+        model_id: "eleven_multilingual_v2",
+        voice_settings: { stability: 0.5 },
+      },
+    });
+    // No OpenAI-shaped `voice`/`response_format` keys should leak through.
+    expect(
+      (ttsCall?.body as { promptObject?: Record<string, unknown> })
+        ?.promptObject,
+    ).not.toHaveProperty("voice");
+  });
+
+  it("rejects speed for elevenlabs-tts", async () => {
+    const res = await call("/v1/audio/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "elevenlabs-tts",
+        input: "hello there",
+        speed: 1.5,
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("builds a Qwen3-shaped request and answers with a wav Content-Type", async () => {
+    const res = await call("/v1/audio/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "qwen3-tts-flash",
+        input: "hello there",
+        voice: "Dylan",
+        language_type: "Chinese",
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("Content-Type")).toBe("audio/wav");
+
+    const ttsCall = upstreamCalls.find(
+      (c) => (c.body as { type?: string })?.type === "TEXT_TO_SPEECH",
+    );
+    expect(ttsCall?.body).toMatchObject({
+      type: "TEXT_TO_SPEECH",
+      model: "qwen3-tts-flash",
+      promptObject: {
+        text: "hello there",
+        voice: "Dylan",
+        language_type: "Chinese",
+      },
+    });
+  });
+
+  it("rejects response_format for qwen3-tts-flash", async () => {
+    const res = await call("/v1/audio/speech", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "qwen3-tts-flash",
+        input: "hello there",
+        response_format: "wav",
+      }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it("rejects input that is too long", async () => {

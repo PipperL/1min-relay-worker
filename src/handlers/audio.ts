@@ -22,7 +22,7 @@ import {
 } from "../utils/audio";
 import { ApiError, ValidationError } from "../utils/errors";
 import { createSuccessResponse, extractOneMinContent } from "../utils/response";
-import { parseSpeechRequest, ttsContentType } from "../utils/speech";
+import { parseSpeechRequest, resolveTtsContentType } from "../utils/speech";
 import { BaseTextHandler } from "./base";
 import { toAssetUrl } from "./images";
 
@@ -106,13 +106,7 @@ export class AudioHandler extends BaseTextHandler {
       );
     }
 
-    const requestBody = this.apiService.buildTextToSpeechRequestBody(
-      parsed.text,
-      parsed.model,
-      parsed.voice,
-      parsed.responseFormat,
-      parsed.speed,
-    );
+    const requestBody = this.apiService.buildTextToSpeechRequestBody(parsed);
 
     const data = await this.apiService.sendAudioRequest(requestBody, apiKey);
 
@@ -132,7 +126,10 @@ export class AudioHandler extends BaseTextHandler {
     return new Response(audioResponse.body, {
       status: 200,
       headers: {
-        "Content-Type": ttsContentType(parsed.responseFormat),
+        "Content-Type": resolveTtsContentType(
+          parsed.model,
+          parsed.responseFormat,
+        ),
         "Cache-Control": "no-store",
       },
     });
