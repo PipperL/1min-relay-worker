@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- **README corrected where it contradicted the code**: a colon in a model name
+  is passed through rather than rejected (an unknown name answers 404
+  `model_not_found`); `/v1/responses` rejects only `input_image`, not
+  `input_file`; tests run the routes end to end against a mocked upstream;
+  `usage` comes from the upstream's counts, with a local estimate only as a
+  fallback.
+- **Every fork-only section is now marked**, as the fork notice at the top
+  promised: file attachments, `GET /v1/models/{model}` and `/v1/messages`
+  image support join Text to Speech.
+
 ## [5.1.0+fork.2] - 2026-10-08
 
 Fork-only fixes and features layered on top of `5.1.0+fork.1`. None of these
