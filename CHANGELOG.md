@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [5.1.0+fork.2] - 2026-10-08
+
+Fork-only fixes and features layered on top of `5.1.0+fork.1`. None of these
+are in upstream.
+
+### Added
+- **Image content blocks in `/v1/messages`**: the Anthropic Messages endpoint
+  used to answer 400 for any `image` block and point callers at
+  `/v1/chat/completions`. Image blocks are now converted into the same
+  internal shape the OpenAI path uses — a `base64` source becomes a `data:`
+  URL, a `url` source is passed through — and go through the shared Asset API
+  upload. Requests without images still flatten to a plain string exactly as
+  before. Vision gating is unchanged: a non-vision model still gets a 400,
+  now from the shared "does not support image inputs" check.
+
+### Fixed
+- **Text-to-speech sent every model the same OpenAI-shaped fields**: ElevenLabs
+  silently ignored the requested voice and format because it needs
+  `voice_id`/`output_format`, and the response `Content-Type` echoed the
+  requested format instead of what the model returns. `parseSpeechRequest`
+  now branches per model:
+  - `elevenlabs-tts`: native `voice_id`/`output_format` win over
+    `voice`/`response_format`; `speed` is rejected (no equivalent).
+  - `qwen3-tts-flash`: `voice` passes through; `response_format`,
+    `output_format` and `speed` are rejected (always WAV, no speed control).
+  - Every other model keeps the original OpenAI-shaped behaviour.
+
+  Model-specific fields with no OpenAI equivalent are passed through
+  unvalidated, and `Content-Type` now reflects the actual output
+  (`audio/mpeg` for ElevenLabs, `audio/wav` for Qwen3).
+
+### Changed
+- **README marks this as a personal fork**: the version badge, clone URL and
+  "Deploy to Cloudflare" button now point at `PipperL/1min-relay-worker`
+  instead of upstream (the button used to deploy upstream's code, missing
+  every fork-only fix). The upstream Codecov badge is dropped.
+- **CI no longer triggers on `dev`**: the branch is gone; fork work happens
+  on `main`.
+
+### Tests
+- Direct tests for `buildTextToSpeechRequestBody`'s spread order, which stops
+  a client from overriding `text`/`voice`/`response_format` through the
+  passthrough fields, for all three model branches.
+- `/v1/messages` image coverage for multiple images in one message, an image
+  alongside a `tool_result`, and the streaming path.
+
 ## [5.1.0+fork.1] - 2026-09-06
 
 Reconciliation with upstream's `5.1.0`, which independently backported most of
