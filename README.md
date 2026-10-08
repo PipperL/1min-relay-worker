@@ -74,8 +74,10 @@ search enabled:
 ```
 
 Tune it with the `WEB_SEARCH_NUM_OF_SITE` (default `1`) and
-`WEB_SEARCH_MAX_WORD` (default `500`) environment variables. Any other colon
-suffix is rejected with a 400.
+`WEB_SEARCH_MAX_WORD` (default `500`) environment variables. Any other name,
+colons included, is passed through as a model id: a colon is not reserved,
+since an upstream id may contain one. A name that matches no model —
+including a mistyped suffix such as `:onlien` — answers `404 model_not_found`.
 
 ## API Endpoints
 
@@ -212,6 +214,8 @@ array form:
 
 ##### File attachments
 
+> File attachments are a fork-only addition — not part of the upstream project.
+
 An `input_file` part attaches a document (PDF, DOCX, TXT, CSV, JSON, ...) to
 the request. Identify the file in one of three ways:
 
@@ -301,9 +305,9 @@ curl -X POST http://localhost:8787/v1/responses \
 
 - **Structured Outputs**: JSON objects and JSON schema validation
 - **Reasoning Effort**: Control reasoning depth (low, medium, high)
-- **Text only**: unlike Chat Completions, `/v1/responses` rejects non-text
-  content parts (`input_image`, `input_file`) with a 400. Use
-  `/v1/chat/completions` for vision requests.
+- **No image input**: `input_image` parts are rejected with a 400; use
+  `/v1/chat/completions` for vision requests. `input_file` attachments are
+  supported (see **File attachments** below).
 - **Streaming Support**: Full OpenAI-compatible SSE streaming with `response.completed` terminal event
 - **Enhanced Prompting**: Automatically optimizes prompts for structured responses
 
@@ -490,6 +494,9 @@ models the registry reports as vision-capable — a non-vision model answers
 with a 400. `tools` is accepted by the schema but ignored, since the
 upstream Chat with AI API has no function-calling support.
 
+> Image support on `/v1/messages` is a fork-only addition — upstream rejects
+> `image` blocks with a 400.
+
 ### List Models
 
 ```
@@ -507,6 +514,8 @@ markers still served normally on their listed date, not a per-model cutoff.
 ```
 GET /v1/models/{model}
 ```
+
+> This endpoint is a fork-only addition — not part of the upstream project.
 
 Returns a single model object, or `404 model_not_found`. Model ids containing
 a slash work either raw or percent-encoded:
@@ -624,8 +633,8 @@ npm test          # single run
 npm run test:watch
 ```
 
-Tests live in `tests/` and cover the pure request/response conversion
-helpers, so they need no Worker runtime or upstream API key.
+Tests live in `tests/` and exercise the routes end to end with the upstream
+API mocked, so they need no Worker runtime or upstream API key.
 
 ### Deployment
 
@@ -802,7 +811,13 @@ slightly.
 
 ## Token Counting
 
-Accurate token counting is implemented using the `gpt-tokenizer` library, which provides good approximations for all supported models including GPT, Claude, Mistral, and others. A character-based fallback is used if tokenization fails.
+The `usage` reported to clients comes from the upstream's own counts
+(`aiRecord.metadata`). When the upstream omits them or reports all zeroes,
+the relay estimates them locally with the `gpt-tokenizer` library, which gives
+good approximations for GPT, Claude, Mistral and the other supported models,
+with a character-based fallback if tokenization fails. The tokens-per-minute
+rate limit is charged with a local estimate of each request, taken before it
+is sent upstream.
 
 ## Contributing
 
