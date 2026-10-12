@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Moderation blocks no longer come back as an empty success**: 1min.ai
+  rejects a flagged prompt with HTTP 200, `aiRecord.status: "FAILURE"` and an
+  error object in place of `resultObject` — streaming sends it as
+  `event: result` with no `event: error`. The relay read that as an empty
+  answer. Such records now fail: a content-policy block answers 400
+  `content_policy_violation` (as OpenAI's own endpoint does), any other failed
+  record 502; streaming ends with an error frame instead of `[DONE]`.
+
 ### Documentation
 - **README corrected where it contradicted the code**: a colon in a model name
   is passed through rather than rejected (an unknown name answers 404

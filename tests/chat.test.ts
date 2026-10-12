@@ -13,6 +13,7 @@ import {
   IMAGE_MODEL,
   installFetchMock,
   oneMinChatResponse,
+  oneMinFailedRecord,
   requestTo,
   sseResponse,
   testCtx,
@@ -97,6 +98,41 @@ describe("non-streaming", () => {
       string
     >;
     expect(headers["API-KEY"]).toBe("test-key");
+  });
+
+  it("rejects a moderation block instead of returning an empty answer", async () => {
+    upstream.reply(UPSTREAM.chat, () => Response.json(oneMinFailedRecord()));
+
+    const res = await post({
+      model: CHAT_MODEL,
+      messages: [{ role: "user", content: "a lighthouse keeper story" }],
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: {
+        type: "invalid_request_error",
+        code: "content_policy_violation",
+        param: "messages",
+        message: expect.stringContaining("content policy"),
+      },
+    });
+  });
+
+  it("reports any other failed record as an upstream error", async () => {
+    upstream.reply(UPSTREAM.chat, () =>
+      Response.json(oneMinFailedRecord("SOMETHING_ELSE", "it broke")),
+    );
+
+    const res = await post({
+      model: CHAT_MODEL,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({
+      error: { code: "SOMETHING_ELSE", message: "it broke" },
+    });
   });
 
   it("estimates usage locally when the upstream reports none", async () => {
@@ -385,6 +421,27 @@ describe("streaming", () => {
     expect(text).toContain('"message":"model exploded"');
     expect(text).toContain('"code":"upstream_stream_error"');
     expect(text).not.toContain("[DONE]");
+  });
+
+  it("writes an error frame for a failed record in event: result", async () => {
+    upstream.reply(UPSTREAM.chat, () =>
+      sseResponse([
+        `event: result\ndata: ${JSON.stringify(oneMinFailedRecord())}`,
+        'event: done\ndata: {"message":"Stream completed"}',
+      ]),
+    );
+
+    const res = await post({
+      model: CHAT_MODEL,
+      stream: true,
+      messages: [{ role: "user", content: "a lighthouse keeper story" }],
+    });
+
+    const text = await res.text();
+    expect(text).toContain('"code":"content_policy_violation"');
+    expect(text).toContain('"type":"invalid_request_error"');
+    expect(text).not.toContain("[DONE]");
+    expect(text).not.toContain('"finish_reason":"stop"');
   });
 
   it("passes through a non-SSE body that never sends a blank line", async () => {
