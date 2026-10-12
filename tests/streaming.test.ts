@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { parseSSEChunks } from "../src/utils/streaming";
+import { oneMinFailedRecord } from "./helpers";
 
 // Wire format captured from a live 1min.ai streaming response.
 const CONTENT_BLOCK = 'event: content\ndata: {"content":"Hello"}';
@@ -31,6 +32,25 @@ describe("parseSSEChunks", () => {
       error: undefined,
       terminal: true,
     });
+  });
+
+  it("surfaces a failed record delivered as a result event", () => {
+    // Moderation blocks stream no error event — only this record, then done.
+    const result = parseSSEChunks(
+      `event: result\ndata: ${JSON.stringify(oneMinFailedRecord())}`,
+    );
+    expect(result?.failure).toEqual({
+      code: "OPEN_AI_CONTENT_POLICY_VIOLATION",
+      message: "The input content may violate our content policy (violence)!",
+    });
+    expect(result?.error).toBeUndefined();
+  });
+
+  it("does not flag a successful result record", () => {
+    const result = parseSSEChunks(
+      'event: result\ndata: {"aiRecord":{"status":"SUCCESS","aiRecordDetail":{"resultObject":["Hello"]}}}',
+    );
+    expect(result?.failure).toBeUndefined();
   });
 
   it("surfaces an upstream error event", () => {

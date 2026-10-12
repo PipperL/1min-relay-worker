@@ -3,7 +3,12 @@
  * Eliminates duplicated TransformStream/reader/writer boilerplate across handlers
  */
 
-import { ApiError } from "./errors";
+import { ApiError, ValidationError } from "./errors";
+import {
+  extractOneMinFailure,
+  type OneMinFailure,
+  oneMinFailureError,
+} from "./response";
 import { createSSEResponse } from "./sse";
 import { SimpleUTF8Decoder } from "./utf8-decoder";
 
@@ -52,6 +57,8 @@ export interface ParsedSSEBlock {
   chunks: string[];
   /** Message from an `event: error` event, if the upstream reported a failure. */
   error?: string;
+  /** A failed record delivered as `event: result` (e.g. a moderation block). */
+  failure?: OneMinFailure;
   /** True if the block carried a terminal event (`result` or `done`). */
   terminal: boolean;
 }
@@ -87,7 +94,9 @@ function extractStreamErrorMessage(dataStr: string): string {
  * HTTP 200 and an `event: error` payload, so treating it as a normal end of
  * stream would report a truncated (often empty) success to the client.
  *
- * `event: result` (full record) and `event: done` (terminator) are ignored.
+ * `event: result` carries the full record; it is only inspected for a failed
+ * status, which the upstream reports there instead of in `event: error`.
+ * `event: done` (terminator) is ignored.
  * Returns null if no SSE structure was found (caller should use raw text).
  *
  * Issue #6: eventType persists across multiple data lines within the same event block,
@@ -99,6 +108,7 @@ export function parseSSEChunks(text: string): ParsedSSEBlock | null {
   let hasSSEStructure = false;
   let currentEventType = "";
   let error: string | undefined;
+  let failure: OneMinFailure | undefined;
   let terminal = false;
 
   for (let i = 0; i < lines.length; i++) {
@@ -132,7 +142,17 @@ export function parseSSEChunks(text: string): ParsedSSEBlock | null {
         continue;
       }
 
-      // Skip other non-content events (result, done)
+      // Upstream failure: HTTP 200 with a failed record and no error event
+      if (currentEventType === "result") {
+        try {
+          failure ??= extractOneMinFailure(JSON.parse(dataStr)) ?? undefined;
+        } catch {
+          // Unparseable record — nothing to report
+        }
+        continue;
+      }
+
+      // Skip other non-content events (done)
       if (currentEventType && currentEventType !== "content") {
         continue;
       }
@@ -151,7 +171,7 @@ export function parseSSEChunks(text: string): ParsedSSEBlock | null {
     }
   }
 
-  return hasSSEStructure ? { chunks, error, terminal } : null;
+  return hasSSEStructure ? { chunks, error, failure, terminal } : null;
 }
 
 /**
@@ -172,6 +192,7 @@ async function processSSEBlock(
     // client the (possibly empty) partial answer was the whole answer.
     throw new ApiError(parsed.error, 502, "upstream_stream_error");
   }
+  if (parsed.failure) throw oneMinFailureError(parsed.failure);
 
   let content = accumulatedContent;
   for (const chunk of parsed.chunks) {
@@ -306,9 +327,10 @@ export function executeStreamingPipeline(
       try {
         const errorMessage =
           error instanceof Error ? error.message : "Stream interrupted";
-        const errorType =
-          error instanceof ApiError ? error.type : "server_error";
-        const errorCode = error instanceof ApiError ? error.code : null;
+        const known =
+          error instanceof ApiError || error instanceof ValidationError;
+        const errorType = known ? error.type : "server_error";
+        const errorCode = known ? error.code : null;
         const detail: StreamErrorDetail = {
           message: errorMessage,
           type: errorType,

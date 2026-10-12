@@ -176,6 +176,26 @@ export function oneMinChatResponse(
   });
 }
 
+/**
+ * A record the upstream marked as failed, shaped as captured live
+ * (2026-10-12): HTTP 200, error object in place of `resultObject`.
+ */
+export function oneMinFailedRecord(
+  code = "OPEN_AI_CONTENT_POLICY_VIOLATION",
+  message = "The input content may violate our content policy (violence)!",
+) {
+  return {
+    aiRecord: {
+      status: "FAILURE",
+      metadata: { credit: 0, executionTime: 0.287 },
+      aiRecordDetail: {
+        resultObject: { code, name: "ValidationError", message },
+        responseObject: {},
+      },
+    },
+  };
+}
+
 /** An SSE streaming response body in the upstream's wire format. */
 export function sseResponse(blocks: string[]): Response {
   const body = blocks.map((b) => `${b}\n\n`).join("");

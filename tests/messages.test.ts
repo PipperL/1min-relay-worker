@@ -12,6 +12,7 @@ import {
   type FetchMock,
   installFetchMock,
   oneMinChatResponse,
+  oneMinFailedRecord,
   requestTo,
   sseResponse,
   testCtx,
@@ -56,6 +57,25 @@ const prompt = () =>
     .prompt as string;
 
 describe("non-streaming", () => {
+  it("rejects a moderation block as an Anthropic error", async () => {
+    upstream.reply(UPSTREAM.chat, () => Response.json(oneMinFailedRecord()));
+
+    const res = await post({
+      model: CHAT_MODEL,
+      max_tokens: 100,
+      messages: [{ role: "user", content: "hi" }],
+    });
+
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      type: "error",
+      error: {
+        type: "invalid_request_error",
+        message: expect.stringContaining("content policy"),
+      },
+    });
+  });
+
   it("returns an Anthropic message", async () => {
     upstream.reply(UPSTREAM.chat, () =>
       oneMinChatResponse("Bonjour", {

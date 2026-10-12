@@ -6,11 +6,86 @@
  */
 
 import type { OneMinChatResponse } from "../types";
+import { ApiError, ValidationError } from "./errors";
+
+export interface OneMinFailure {
+  message: string;
+  code?: string;
+}
+
+const MAX_FAILURE_MESSAGE_LENGTH = 500;
+
+/**
+ * Detect a record the upstream marked as failed.
+ *
+ * Some failures arrive as HTTP 200: the moderation check that runs before
+ * every chat answers with `aiRecord.status: "FAILURE"` and puts the error
+ * object where the answer would be —
+ *
+ *   "resultObject": {"code":"OPEN_AI_CONTENT_POLICY_VIOLATION",
+ *                    "name":"ValidationError","message":"The input content…"}
+ *
+ * — so `resultObject[0]` is undefined and the request looked like an empty
+ * success. Streaming is no different: no `event: error`, just an
+ * `event: result` carrying this same record.
+ */
+export function extractOneMinFailure(data: unknown): OneMinFailure | null {
+  if (!data || typeof data !== "object") return null;
+  const record = (data as { aiRecord?: unknown }).aiRecord;
+  if (!record || typeof record !== "object") return null;
+
+  const { status, aiRecordDetail } = record as {
+    status?: unknown;
+    aiRecordDetail?: { resultObject?: unknown };
+  };
+  const result = aiRecordDetail?.resultObject;
+  const errorObject =
+    result && typeof result === "object" && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : null;
+
+  if (status !== "FAILURE" && !errorObject) return null;
+
+  const rawMessage =
+    typeof errorObject?.message === "string" && errorObject.message.trim()
+      ? errorObject.message.trim()
+      : "1min.ai reported the request as failed";
+  const message =
+    rawMessage.length > MAX_FAILURE_MESSAGE_LENGTH
+      ? `${rawMessage.slice(0, MAX_FAILURE_MESSAGE_LENGTH - 1)}…`
+      : rawMessage;
+  const code =
+    typeof errorObject?.code === "string" ? errorObject.code : undefined;
+
+  return { message, code };
+}
+
+/**
+ * The error to raise for a failed record. A moderation rejection is the
+ * caller's input, so it maps to what OpenAI's own endpoint answers (400
+ * `content_policy_violation`); anything else is the upstream's fault.
+ */
+export function oneMinFailureError(
+  failure: OneMinFailure,
+): ValidationError | ApiError {
+  if (failure.code?.includes("CONTENT_POLICY")) {
+    return new ValidationError(
+      failure.message,
+      "messages",
+      "content_policy_violation",
+    );
+  }
+  return new ApiError(failure.message, 502, failure.code ?? "upstream_error");
+}
 
 /**
  * Extract text content from a 1min.ai response, with consistent fallback logic.
+ * Throws when the upstream marked the record as failed.
  */
 export function extractOneMinContent(data: OneMinChatResponse): string {
+  const failure = extractOneMinFailure(data);
+  if (failure) throw oneMinFailureError(failure);
+
   const content =
     data.aiRecord?.aiRecordDetail?.resultObject?.[0] || data.content;
   if (!content) {
